@@ -260,20 +260,27 @@ function extractAnimationData(clip) {
       const t  = qTrack.times[i];
       const qi = i * 4;
       if (qi + 3 >= qTrack.values.length) break;
+
+      // Mixamo/Three.js usa Z-forward, Y-up
+      // Convertir a Roblox: rotar -90 grados en X para corregir ejes
+      // Quaternion de correccion: rotacion -90deg en X = (sin(-45deg), 0, 0, cos(-45deg))
       const qx = qTrack.values[qi];
       const qy = qTrack.values[qi+1];
       const qz = qTrack.values[qi+2];
       const qw = qTrack.values[qi+3];
-      const mat = quatToMat(qx, qy, qz, qw);
 
-      let px = 0, py = 0, pz = 0;
-      if (pTrack && i*3+2 < pTrack.values.length) {
-        px = pTrack.values[i*3]   / 10;
-        py = pTrack.values[i*3+1] / 10;
-        pz = pTrack.values[i*3+2] / 10;
-      }
+      // Convertir de Three.js (Y-up, Z-forward) a Roblox (Y-up, -Z-forward)
+      // Equivale a: q_roblox = q_correction * q_mixamo * q_correction_inv
+      // Correccion: intercambiar Y y Z, negar Z
+      // Para Mixamo → Roblox: qx=qx, qy=-qz, qz=qy, qw=qw (swap Y/Z axes)
+      const rx =  qx;
+      const ry =  qy;
+      const rz = -qz;
+      const rw =  qw;
 
-      keyframes.push({ time: t, ...mat, x: px, y: py, z: pz });
+      const mat = quatToMat(rx, ry, rz, rw);
+
+      keyframes.push({ time: t, ...mat, x: 0, y: 0, z: 0 });
       totalKeyframes++;
     }
 
