@@ -442,16 +442,38 @@ end
 
 `;
 
+  // Multiplicar dos matrices
+  const mul = (a, b) => ({
+    r00: a.r00*b.r00+a.r01*b.r10+a.r02*b.r20, r01: a.r00*b.r01+a.r01*b.r11+a.r02*b.r21, r02: a.r00*b.r02+a.r01*b.r12+a.r02*b.r22,
+    r10: a.r10*b.r00+a.r11*b.r10+a.r12*b.r20, r11: a.r10*b.r01+a.r11*b.r11+a.r12*b.r21, r12: a.r10*b.r02+a.r11*b.r12+a.r12*b.r22,
+    r20: a.r20*b.r00+a.r21*b.r10+a.r22*b.r20, r21: a.r20*b.r01+a.r21*b.r11+a.r22*b.r21, r22: a.r20*b.r02+a.r21*b.r12+a.r22*b.r22,
+    x: a.r00*b.x+a.r01*b.y+a.r02*b.z+a.x, y: a.r10*b.x+a.r11*b.y+a.r12*b.z+a.y, z: a.r20*b.x+a.r21*b.y+a.r22*b.z+a.z,
+  });
+  const inv = (m) => ({
+    r00:m.r00, r01:m.r10, r02:m.r20,
+    r10:m.r01, r11:m.r11, r12:m.r21,
+    r20:m.r02, r21:m.r12, r22:m.r22,
+    x:-(m.r00*m.x+m.r10*m.y+m.r20*m.z),
+    y:-(m.r01*m.x+m.r11*m.y+m.r21*m.z),
+    z:-(m.r02*m.x+m.r12*m.y+m.r22*m.z),
+  });
+  const identity = {r00:1,r01:0,r02:0,r10:0,r11:1,r12:0,r20:0,r21:0,r22:1,x:0,y:0,z:0};
+  const getMat = (bone, t) => (reducedByBone[bone] && reducedByBone[bone][t]) || identity;
+
+  // CFrame relativo: inv(parent) * child — lo que Roblox necesita para Pose.CFrame
+  const getRelCF = (bone, t) => {
+    const parent = BONE_HIERARCHY[bone];
+    if (!parent) return getMat(bone, t);
+    return mul(inv(getMat(parent, t)), getMat(bone, t));
+  };
+
+  const toCF = (m) =>
+    `CFrame.new(0,0,0,${m.r00.toFixed(5)},${m.r01.toFixed(5)},${m.r02.toFixed(5)},${m.r10.toFixed(5)},${m.r11.toFixed(5)},${m.r12.toFixed(5)},${m.r20.toFixed(5)},${m.r21.toFixed(5)},${m.r22.toFixed(5)})`;
+
   // Generar keyframes con jerarquia correcta
   sortedTimes.forEach(t => {
     const tStr = t.toFixed(4);
-
-    // Obtener CFrame de cada hueso en este tiempo (o identidad si no existe)
-    const getCF = (bone) => {
-      const kf = reducedByBone[bone] && reducedByBone[bone][t];
-      if (!kf) return `CFrame.new()`;
-      return `CFrame.new(${kf.x.toFixed(3)},${kf.y.toFixed(3)},${kf.z.toFixed(3)},${kf.r00.toFixed(4)},${kf.r01.toFixed(4)},${kf.r02.toFixed(4)},${kf.r10.toFixed(4)},${kf.r11.toFixed(4)},${kf.r12.toFixed(4)},${kf.r20.toFixed(4)},${kf.r21.toFixed(4)},${kf.r22.toFixed(4)})`;
-    };
+    const getCF = (bone) => toCF(getRelCF(bone, t));
 
     script += `do -- t=${tStr}
 local kf=makeKeyframe(${tStr})
