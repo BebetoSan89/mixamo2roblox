@@ -205,21 +205,23 @@ async function handleFile(file) {
     document.getElementById("downloadBtn").onclick = () => downloadFile(rbxanim, originalFileName + ".rbxanim");
 
     document.getElementById("copyStudioBtn").onclick = () => {
-      navigator.clipboard.writeText(rbxanim).then(() => {
-        const fb = document.getElementById("copyFeedback");
-        fb.style.display = "block";
-        setTimeout(() => fb.style.display = "none", 3000);
-      }).catch(() => {
-        const ta = document.createElement("textarea");
-        ta.value = rbxanim;
-        document.body.appendChild(ta);
-        ta.select();
+      // Generar script de Lua que crea la animacion directamente en Studio
+      const luaScript = generateLuaScript(rbxanim, originalFileName);
+      const ta = document.createElement("textarea");
+      ta.value = luaScript;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
         document.execCommand("copy");
-        ta.remove();
-        const fb = document.getElementById("copyFeedback");
-        fb.style.display = "block";
-        setTimeout(() => fb.style.display = "none", 3000);
-      });
+      } catch(e) {}
+      ta.remove();
+      navigator.clipboard.writeText(luaScript).catch(() => {});
+      const fb = document.getElementById("copyFeedback");
+      fb.style.display = "block";
+      setTimeout(() => fb.style.display = "none", 4000);
     };
 
   } catch (err) {
@@ -625,9 +627,65 @@ function downloadFile(content, filename) {
   URL.revokeObjectURL(url);
 }
 
-// ── Utils ────────────────────────────────────────────────────
+// ── Lua Script Generator ─────────────────────────────────────
+// Genera un script de Lua para pegar en la Command Bar de Studio
+// que crea la animacion directamente en el personaje seleccionado
 
-function delay(ms) {
+function generateLuaScript(rbxanimXml, animName) {
+  // Escapar el XML para meterlo en un string de Lua
+  // Usamos [[ ]] de Lua para strings multilinea
+  // pero necesitamos escapar los ]] que puedan estar dentro
+  const escaped = rbxanimXml
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "");
+
+  const script = `-- Mixamo2Roblox — Script generado automaticamente
+-- Pega esto en: View → Command Bar → Enter
+local animName = "${animName || 'MixamoAnim'}"
+local xmlData = "${escaped}"
+
+-- Buscar personaje seleccionado o el primero en Workspace
+local model = nil
+local sel = game:GetService("Selection"):Get()
+if #sel > 0 then
+  local s = sel[1]
+  if s:IsA("BasePart") then s = s.Parent end
+  if s:FindFirstChildOfClass("Humanoid") then model = s end
+end
+if not model then
+  for _, v in ipairs(workspace:GetChildren()) do
+    if v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") then
+      model = v
+      break
+    end
+  end
+end
+if not model then
+  warn("[Mixamo2Roblox] No se encontro personaje. Selecciona uno primero.")
+  return
+end
+
+-- Guardar como StringValue para que Animation Editor lo importe
+local existing = model:FindFirstChild("MixamoAnimation_" .. animName)
+if existing then existing:Destroy() end
+local sv = Instance.new("StringValue")
+sv.Name = "MixamoAnimation_" .. animName
+sv.Value = xmlData
+sv.Parent = model
+
+-- Seleccionar el personaje
+game:GetService("Selection"):Set({model})
+
+print("[Mixamo2Roblox] ✅ Listo! Animacion guardada en: " .. model.Name)
+print("[Mixamo2Roblox] Ahora: Plugins → Animation Editor → selecciona el personaje → ··· → Import Animation")
+`;
+
+  return script;
+}
+
+
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
