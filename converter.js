@@ -1,6 +1,6 @@
 // ============================================================
-//  converter.js  v2.0  —  Mixamo FBX → Roblox .rbxanim
-//  Usa Three.js FBXLoader para parsear FBX correctamente
+//  converter.js  v4.0  —  Mixamo FBX → Roblox KeyframeSequence
+//  Conversion correcta: rotaciones locales relativas al padre
 // ============================================================
 
 const BONE_MAP = {
@@ -10,27 +10,46 @@ const BONE_MAP = {
   "RightShoulder":"RightUpperArm","RightArm":"RightUpperArm","RightForeArm":"RightLowerArm","RightHand":"RightHand",
   "LeftUpLeg":"LeftUpperLeg","LeftLeg":"LeftLowerLeg","LeftFoot":"LeftFoot","LeftToeBase":"LeftFoot",
   "RightUpLeg":"RightUpperLeg","RightLeg":"RightLowerLeg","RightFoot":"RightFoot","RightToeBase":"RightFoot",
-  "mixamorig:Hips":"HumanoidRootPart","mixamorig:Spine":"LowerTorso","mixamorig:Spine1":"LowerTorso",
-  "mixamorig:Spine2":"UpperTorso","mixamorig:Neck":"Head","mixamorig:Head":"Head",
-  "mixamorig:LeftShoulder":"LeftUpperArm","mixamorig:LeftArm":"LeftUpperArm","mixamorig:LeftForeArm":"LeftLowerArm","mixamorig:LeftHand":"LeftHand",
-  "mixamorig:RightShoulder":"RightUpperArm","mixamorig:RightArm":"RightUpperArm","mixamorig:RightForeArm":"RightLowerArm","mixamorig:RightHand":"RightHand",
-  "mixamorig:LeftUpLeg":"LeftUpperLeg","mixamorig:LeftLeg":"LeftLowerLeg","mixamorig:LeftFoot":"LeftFoot",
-  "mixamorig:RightUpLeg":"RightUpperLeg","mixamorig:RightLeg":"RightLowerLeg","mixamorig:RightFoot":"RightFoot",
-  // Sin dos puntos (Three.js remueve el : del nombre)
   "mixamorigHips":"HumanoidRootPart","mixamorigSpine":"LowerTorso","mixamorigSpine1":"LowerTorso",
   "mixamorigSpine2":"UpperTorso","mixamorigNeck":"Head","mixamorigHead":"Head",
   "mixamorigLeftShoulder":"LeftUpperArm","mixamorigLeftArm":"LeftUpperArm","mixamorigLeftForeArm":"LeftLowerArm","mixamorigLeftHand":"LeftHand",
   "mixamorigRightShoulder":"RightUpperArm","mixamorigRightArm":"RightUpperArm","mixamorigRightForeArm":"RightLowerArm","mixamorigRightHand":"RightHand",
-  "mixamorigLeftUpLeg":"LeftUpperLeg","mixamorigLeftLeg":"LeftLowerLeg","mixamorigLeftFoot":"LeftFoot","mixamorigLeftToeBase":"LeftFoot",
-  "mixamorigRightUpLeg":"RightUpperLeg","mixamorigRightLeg":"RightLowerLeg","mixamorigRightFoot":"RightFoot","mixamorigRightToeBase":"RightFoot",
+  "mixamorigLeftUpLeg":"LeftUpperLeg","mixamorigLeftLeg":"LeftLowerLeg","mixamorigLeftFoot":"LeftFoot",
+  "mixamorigRightUpLeg":"RightUpperLeg","mixamorigRightLeg":"RightLowerLeg","mixamorigRightFoot":"RightFoot",
 };
+
+// Jerarquia R15 — padre de cada hueso
+const BONE_PARENT = {
+  "HumanoidRootPart": null,
+  "LowerTorso": "HumanoidRootPart",
+  "UpperTorso": "LowerTorso",
+  "Head": "UpperTorso",
+  "LeftUpperArm": "UpperTorso",
+  "LeftLowerArm": "LeftUpperArm",
+  "LeftHand": "LeftLowerArm",
+  "RightUpperArm": "UpperTorso",
+  "RightLowerArm": "RightUpperArm",
+  "RightHand": "RightLowerArm",
+  "LeftUpperLeg": "LowerTorso",
+  "LeftLowerLeg": "LeftUpperLeg",
+  "LeftFoot": "LeftLowerLeg",
+  "RightUpperLeg": "LowerTorso",
+  "RightLowerLeg": "RightUpperLeg",
+  "RightFoot": "RightLowerLeg",
+};
+
+const BONE_ORDER = ["HumanoidRootPart","LowerTorso","UpperTorso","Head",
+  "LeftUpperArm","LeftLowerArm","LeftHand",
+  "RightUpperArm","RightLowerArm","RightHand",
+  "LeftUpperLeg","LeftLowerLeg","LeftFoot",
+  "RightUpperLeg","RightLowerLeg","RightFoot"];
 
 let convertedRbxanim = null;
 let convertedLuaScript = null;
 let originalFileName = "";
 let threeLoaded = false;
 
-// ── Cargar Three.js + FBXLoader ───────────────────────────────
+// ── Cargar Three.js ───────────────────────────────────────────
 function loadThree() {
   if (threeLoaded) return Promise.resolve(true);
   return new Promise(resolve => {
@@ -60,8 +79,8 @@ function setStep(id, state, statusText) {
   if (!el) return;
   el.className = "prog-step " + state;
   const status = el.querySelector(".prog-status");
-  const icon   = el.querySelector(".prog-icon");
-  const icons  = {"step-parse":"📂","step-bones":"🦴","step-keyframes":"🎞️","step-export":"✅"};
+  const icon = el.querySelector(".prog-icon");
+  const icons = {"step-parse":"📂","step-bones":"🦴","step-keyframes":"🎞️","step-export":"✅"};
   if (status) {
     if (state === "active") status.innerHTML = '<span class="spinner"></span>';
     else status.textContent = statusText;
@@ -92,92 +111,71 @@ function resetConverter() {
 // ── Drag & Drop ───────────────────────────────────────────────
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("fileInput");
-
 dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("drag-over"); });
 dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
-dropzone.addEventListener("drop", e => {
-  e.preventDefault(); dropzone.classList.remove("drag-over");
-  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
-});
+dropzone.addEventListener("drop", e => { e.preventDefault(); dropzone.classList.remove("drag-over"); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
 fileInput.addEventListener("change", e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 dropzone.addEventListener("click", e => { if (e.target.tagName !== "BUTTON") fileInput.click(); });
 
 // ── Main ──────────────────────────────────────────────────────
 async function handleFile(file) {
-  if (!file.name.toLowerCase().endsWith(".fbx")) {
-    showError("El archivo debe ser .fbx — descárgalo de Mixamo con formato FBX Binary.");
-    return;
-  }
-
+  if (!file.name.toLowerCase().endsWith(".fbx")) { showError("El archivo debe ser .fbx"); return; }
   originalFileName = file.name.replace(/\.fbx$/i, "");
   dropzone.style.display = "none";
   document.getElementById("progressWrap").classList.add("visible");
   document.getElementById("errorCard").classList.remove("visible");
 
   try {
-    // Paso 1 — cargar Three.js y leer archivo
     setStep("step-parse", "active", "");
     const ok = await loadThree();
-    if (!ok || !window.THREE || !window.THREE.FBXLoader) {
-      throw new Error("No se pudo cargar Three.js FBXLoader. Verifica tu conexión.");
-    }
+    if (!ok || !window.THREE || !window.THREE.FBXLoader) throw new Error("No se pudo cargar Three.js");
     const buffer = await file.arrayBuffer();
     setStep("step-parse", "done", "listo");
     await delay(150);
 
-    // Paso 2 — parsear FBX
     setStep("step-bones", "active", "");
     let object;
     try {
       const loader = new window.THREE.FBXLoader();
       object = loader.parse(buffer, "");
-    } catch(e) {
-      throw new Error("No se pudo leer el FBX: " + e.message + ". Asegúrate de descargar 'Without Skin' desde Mixamo.");
-    }
+    } catch(e) { throw new Error("Error leyendo FBX: " + e.message); }
 
-    if (!object.animations || object.animations.length === 0) {
-      throw new Error("No se encontraron animaciones en el archivo. Descarga desde Mixamo con 'Without Skin' y 30 FPS.");
-    }
+    if (!object.animations || object.animations.length === 0)
+      throw new Error("No se encontraron animaciones. Descarga de Mixamo con 'Without Skin'.");
 
     const clip = object.animations[0];
+    console.log("[M2R] Tracks:", clip.tracks.length);
+    clip.tracks.slice(0,5).forEach(t => console.log("  ", t.name));
 
-    // Debug: mostrar los primeros 10 tracks para diagnostico
-    console.log("[Mixamo2Roblox] Total tracks:", clip.tracks.length);
-    clip.tracks.slice(0, 10).forEach(t => console.log("  track:", t.name, "| times:", t.times.length));
-
-    const mappedCount = countMappedBones(clip);
+    // Extraer datos crudos de Three.js (quaterniones locales por hueso)
+    const rawBones = extractRawBones(clip);
+    const mappedCount = Object.keys(rawBones).length;
     setStep("step-bones", "done", `${mappedCount} huesos`);
     await delay(150);
 
-    // Paso 3 — convertir keyframes
     setStep("step-keyframes", "active", "");
     await delay(200);
-    const animData = extractAnimationData(clip);
-    if (animData.totalKeyframes === 0) {
-      // Mostrar tracks disponibles en el error para diagnostico
-      const trackNames = clip.tracks.slice(0,5).map(t=>t.name).join(", ");
-      throw new Error(`Se leyó el FBX pero no se encontraron keyframes válidos. Tracks encontrados: ${trackNames}. Intenta descargar con Keyframe Reduction: None.`);
-    }
+
+    // Construir animacion: calcular poses locales correctas
+    const animData = buildAnimData(rawBones, clip.duration);
+    if (animData.totalKeyframes === 0) throw new Error("No se encontraron keyframes validos.");
     setStep("step-keyframes", "done", `${animData.totalKeyframes} keyframes`);
     await delay(150);
 
-    // Paso 4 — generar rbxanim
     setStep("step-export", "active", "");
     await delay(200);
-    const rbxanim = generateRbxanim(animData, originalFileName);
-    convertedRbxanim = rbxanim;
-    convertedLuaScript = generateLuaScript(rbxanim, originalFileName, animData);
+    convertedLuaScript = generateLuaScript(animData, originalFileName);
+    convertedRbxanim = "generated";
     setStep("step-export", "done", "listo");
     await delay(200);
 
-    // Mostrar resultado
     document.getElementById("statBones").textContent = mappedCount;
     document.getElementById("statFrames").textContent = animData.totalKeyframes;
     document.getElementById("statDuration").textContent = animData.duration.toFixed(1) + "s";
     document.getElementById("resultWrap").classList.add("visible");
 
     document.getElementById("downloadBtn").onclick = () =>
-      downloadFile(rbxanim, originalFileName + ".rbxanim");
+      downloadFile(convertedLuaScript, originalFileName + ".lua");
     document.getElementById("copyStudioBtn").onclick = () =>
       copyToClipboard(convertedLuaScript);
 
@@ -188,306 +186,228 @@ async function handleFile(file) {
   }
 }
 
-// ── Count mapped bones ────────────────────────────────────────
-function countMappedBones(clip) {
-  const mapped = new Set();
-  clip.tracks.forEach(t => {
-    const bone = t.name.split(".")[0];
-    if (BONE_MAP[bone]) mapped.add(BONE_MAP[bone]);
-  });
-  return mapped.size;
-}
-
-// ── Extract animation data ────────────────────────────────────
-function extractAnimationData(clip) {
-  const duration = clip.duration;
-  const boneData = {};
+// ── Extraer quaterniones locales por hueso de Three.js ────────
+// Three.js FBXLoader ya nos da los quaterniones en espacio LOCAL del hueso
+// Esto es exactamente lo que Roblox necesita para Pose.CFrame
+function extractRawBones(clip) {
+  const bones = {};
 
   clip.tracks.forEach(track => {
-    // Three.js puede usar estos formatos de nombre:
-    // "mixamorig:Hips.quaternion"
-    // "mixamorig:Hips_rotationQuaternion"  
-    // "Hips.quaternion"
-    // Separar por ultimo punto
     const lastDot = track.name.lastIndexOf(".");
-    let boneName, prop;
+    if (lastDot === -1) return;
+    let boneName = track.name.substring(0, lastDot);
+    const prop = track.name.substring(lastDot + 1).toLowerCase();
 
-    if (lastDot !== -1) {
-      boneName = track.name.substring(0, lastDot);
-      prop = track.name.substring(lastDot + 1).toLowerCase();
-    } else {
-      // Formato alternativo con guion bajo
-      const parts = track.name.split("_");
-      prop = parts[parts.length - 1].toLowerCase();
-      boneName = parts.slice(0, -1).join("_");
-    }
-
-    // Limpiar nombre del hueso (Three.js a veces agrega sufijos)
-    // Quitar numeros al final como "Hips_1"
+    // Limpiar nombre
     boneName = boneName.replace(/_\d+$/, "");
 
     const roblox = BONE_MAP[boneName];
-    if (!roblox) {
-      // Intentar sin prefijo mixamorig:
-      const clean = boneName.replace("mixamorig:", "");
-      const roblox2 = BONE_MAP[clean];
-      if (!roblox2) return;
-      if (!boneData[roblox2]) boneData[roblox2] = {};
-      boneData[roblox2][prop] = track;
-      return;
-    }
+    if (!roblox) return;
 
-    if (!boneData[roblox]) boneData[roblox] = {};
-    boneData[roblox][prop] = track;
+    if (!bones[roblox]) bones[roblox] = {};
+    if (prop === "quaternion") bones[roblox].q = track;
+    else if (prop === "position") bones[roblox].p = track;
   });
 
-  console.log("[Mixamo2Roblox] Huesos mapeados:", Object.keys(boneData));
-
-  const keyframesByBone = {};
-  let totalKeyframes = 0;
-
-  Object.entries(boneData).forEach(([robloxBone, tracks]) => {
-    // Buscar track de rotacion (puede llamarse quaternion o rotation)
-    const qTrack = tracks["quaternion"] || tracks["rotation"] || tracks["rotationquaternion"];
-    const pTrack = tracks["position"] || tracks["translation"];
-    if (!qTrack) {
-      console.log("[Mixamo2Roblox] Sin track de rotacion para:", robloxBone, "tracks:", Object.keys(tracks));
-      return;
-    }
-
-    const keyframes = [];
-    for (let i = 0; i < qTrack.times.length; i++) {
-      const t  = qTrack.times[i];
-      const qi = i * 4;
-      if (qi + 3 >= qTrack.values.length) break;
-
-      // Mixamo/Three.js usa Z-forward, Y-up
-      // Convertir a Roblox: rotar -90 grados en X para corregir ejes
-      // Quaternion de correccion: rotacion -90deg en X = (sin(-45deg), 0, 0, cos(-45deg))
-      const qx = qTrack.values[qi];
-      const qy = qTrack.values[qi+1];
-      const qz = qTrack.values[qi+2];
-      const qw = qTrack.values[qi+3];
-
-      // Convertir de Three.js (Y-up, Z-forward) a Roblox (Y-up, -Z-forward)
-      // Equivale a: q_roblox = q_correction * q_mixamo * q_correction_inv
-      // Correccion: intercambiar Y y Z, negar Z
-      // Para Mixamo → Roblox: qx=qx, qy=-qz, qz=qy, qw=qw (swap Y/Z axes)
-      const rx =  qx;
-      const ry =  qy;
-      const rz = -qz;
-      const rw =  qw;
-
-      const mat = quatToMat(rx, ry, rz, rw);
-
-      keyframes.push({ time: t, ...mat, x: 0, y: 0, z: 0 });
-      totalKeyframes++;
-    }
-
-    if (keyframes.length > 0) keyframesByBone[robloxBone] = keyframes;
-  });
-
-  return { keyframesByBone, duration, totalKeyframes };
+  return bones;
 }
 
-function quatToMat(x, y, z, w) {
-  const x2=x+x, y2=y+y, z2=z+z;
-  const xx=x*x2, xy=x*y2, xz=x*z2;
-  const yy=y*y2, yz=y*z2, zz=z*z2;
-  const wx=w*x2, wy=w*y2, wz=w*z2;
+// ── Construir datos de animacion ──────────────────────────────
+function buildAnimData(rawBones, duration) {
+  // Reduccion de keyframes: 1 de cada 2 para balance calidad/tamaño
+  const STEP = 2;
+
+  // Recolectar todos los tiempos
+  const allTimes = new Set();
+  Object.values(rawBones).forEach(bone => {
+    if (bone.q) bone.q.times.forEach((t, i) => {
+      if (i % STEP === 0 || i === bone.q.times.length - 1) allTimes.add(parseFloat(t.toFixed(4)));
+    });
+  });
+  const times = Array.from(allTimes).sort((a, b) => a - b);
+
+  // Para cada hueso, interpolar quaternion en cada tiempo
+  const boneFrames = {};
+  let totalKeyframes = 0;
+
+  BONE_ORDER.forEach(robloxBone => {
+    const bone = rawBones[robloxBone];
+    if (!bone || !bone.q) return;
+
+    const frames = times.map(t => {
+      const q = sampleQuaternion(bone.q, t);
+      const p = bone.p ? samplePosition(bone.p, t) : {x:0,y:0,z:0};
+      return { t, qx:q.x, qy:q.y, qz:q.z, qw:q.w, px:p.x, py:p.y, pz:p.z };
+    });
+
+    boneFrames[robloxBone] = frames;
+    totalKeyframes += frames.length;
+  });
+
+  return { boneFrames, times, duration, totalKeyframes };
+}
+
+// Interpolar quaternion en un tiempo dado
+function sampleQuaternion(track, t) {
+  const times = track.times;
+  const vals = track.values;
+
+  if (t <= times[0]) return {x:vals[0],y:vals[1],z:vals[2],w:vals[3]};
+  if (t >= times[times.length-1]) {
+    const i = (times.length-1)*4;
+    return {x:vals[i],y:vals[i+1],z:vals[i+2],w:vals[i+3]};
+  }
+
+  // Buscar intervalo
+  let lo = 0, hi = times.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] <= t) lo = mid; else hi = mid;
+  }
+
+  const alpha = (t - times[lo]) / (times[hi] - times[lo]);
+  const i0 = lo * 4, i1 = hi * 4;
+
+  // SLERP
+  let ax=vals[i0],ay=vals[i0+1],az=vals[i0+2],aw=vals[i0+3];
+  let bx=vals[i1],by=vals[i1+1],bz=vals[i1+2],bw=vals[i1+3];
+
+  let dot = ax*bx+ay*by+az*bz+aw*bw;
+  if (dot < 0) { bx=-bx; by=-by; bz=-bz; bw=-bw; dot=-dot; }
+
+  if (dot > 0.9995) {
+    return {x:ax+(bx-ax)*alpha, y:ay+(by-ay)*alpha, z:az+(bz-az)*alpha, w:aw+(bw-aw)*alpha};
+  }
+
+  const theta0 = Math.acos(dot);
+  const theta = theta0 * alpha;
+  const sinTheta = Math.sin(theta);
+  const sinTheta0 = Math.sin(theta0);
+  const s0 = Math.cos(theta) - dot * sinTheta / sinTheta0;
+  const s1 = sinTheta / sinTheta0;
+
   return {
-    r00:1-(yy+zz), r01:xy+wz,     r02:xz-wy,
-    r10:xy-wz,     r11:1-(xx+zz), r12:yz+wx,
-    r20:xz+wy,     r21:yz-wx,     r22:1-(xx+yy),
+    x: s0*ax+s1*bx, y: s0*ay+s1*by,
+    z: s0*az+s1*bz, w: s0*aw+s1*bw
   };
 }
 
-// ── Generate rbxanim XML ──────────────────────────────────────
-function generateRbxanim(animData, name) {
-  const { keyframesByBone, duration } = animData;
-  let tracksXml = "";
-
-  Object.entries(keyframesByBone).forEach(([boneName, keyframes]) => {
-    let kpXml = "";
-    keyframes.forEach(kf => {
-      kpXml += `\n        <item>
-          <time>${kf.time.toFixed(6)}</time>
-          <pose><CFrame>
-            <R00>${kf.r00.toFixed(6)}</R00><R01>${kf.r01.toFixed(6)}</R01><R02>${kf.r02.toFixed(6)}</R02>
-            <R10>${kf.r10.toFixed(6)}</R10><R11>${kf.r11.toFixed(6)}</R11><R12>${kf.r12.toFixed(6)}</R12>
-            <R20>${kf.r20.toFixed(6)}</R20><R21>${kf.r21.toFixed(6)}</R21><R22>${kf.r22.toFixed(6)}</R22>
-            <X>${kf.x.toFixed(6)}</X><Y>${kf.y.toFixed(6)}</Y><Z>${kf.z.toFixed(6)}</Z>
-          </CFrame></pose>
-          <easingStyle>Linear</easingStyle><easingDirection>In</easingDirection>
-        </item>`;
-    });
-    tracksXml += `\n      <item><n>${boneName}</n><keypoints>${kpXml}\n        </keypoints></item>`;
-  });
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<KeyframeSequence>
-  <n>${name}</n>
-  <Duration>${duration.toFixed(6)}</Duration>
-  <Loop>false</Loop>
-  <Priority>3</Priority>
-  <Keyframes><tracks>${tracksXml}
-    </tracks></Keyframes>
-</KeyframeSequence>`;
+function samplePosition(track, t) {
+  const times = track.times;
+  const vals = track.values;
+  if (t <= times[0]) return {x:vals[0]/100,y:vals[1]/100,z:vals[2]/100};
+  if (t >= times[times.length-1]) {
+    const i = (times.length-1)*3;
+    return {x:vals[i]/100,y:vals[i+1]/100,z:vals[i+2]/100};
+  }
+  let lo = 0, hi = times.length - 1;
+  while (hi - lo > 1) { const mid=(lo+hi)>>1; if(times[mid]<=t) lo=mid; else hi=mid; }
+  const alpha = (t-times[lo])/(times[hi]-times[lo]);
+  const i0=lo*3,i1=hi*3;
+  return {
+    x:(vals[i0]+(vals[i1]-vals[i0])*alpha)/100,
+    y:(vals[i0+1]+(vals[i1+1]-vals[i0+1])*alpha)/100,
+    z:(vals[i0+2]+(vals[i1+2]-vals[i0+2])*alpha)/100,
+  };
 }
 
-// ── Generate Lua script ───────────────────────────────────────
-// Roblox KeyframeSequence estructura correcta:
-// KeyframeSequence
-//   Keyframe (Time=0)
-//     Pose "HumanoidRootPart" (pose raiz)
-//       Pose "LowerTorso"
-//         Pose "UpperTorso"
-//           Pose "Head"
-//           Pose "LeftUpperArm" → LeftLowerArm → LeftHand
-//           Pose "RightUpperArm" → ...
-//       Pose "LeftUpperLeg" → LeftLowerLeg → LeftFoot
-//       Pose "RightUpperLeg" → ...
-
-// Jerarquia de huesos R15
-const BONE_HIERARCHY = {
-  "HumanoidRootPart": null,
-  "LowerTorso": "HumanoidRootPart",
-  "UpperTorso": "LowerTorso",
-  "Head": "UpperTorso",
-  "LeftUpperArm": "UpperTorso",
-  "LeftLowerArm": "LeftUpperArm",
-  "LeftHand": "LeftLowerArm",
-  "RightUpperArm": "UpperTorso",
-  "RightLowerArm": "RightUpperArm",
-  "RightHand": "RightLowerArm",
-  "LeftUpperLeg": "LowerTorso",
-  "LeftLowerLeg": "LeftUpperLeg",
-  "LeftFoot": "LeftLowerLeg",
-  "RightUpperLeg": "LowerTorso",
-  "RightLowerLeg": "RightUpperLeg",
-  "RightFoot": "RightLowerLeg",
-};
-
-function generateLuaScript(rbxanimXml, animName, animData) {
-  const { keyframesByBone, duration } = animData;
-  const STEP = 3;
+// ── Generar script Lua ────────────────────────────────────────
+// Estrategia: pasar quaterniones locales directamente
+// Three.js FBXLoader ya extrae los quaterniones en espacio local del hueso
+// Roblox Pose.CFrame = CFrame construida desde ese quaternion local
+function generateLuaScript(animData, animName) {
+  const { boneFrames, times, duration } = animData;
   const name = (animName || 'MixamoAnim').replace(/[^a-zA-Z0-9_]/g, '_');
 
-  const allTimes = new Set();
-  Object.values(keyframesByBone).forEach(kfs => {
-    kfs.forEach((kf, i) => {
-      if (i % STEP === 0 || i === kfs.length - 1) allTimes.add(parseFloat(kf.time.toFixed(4)));
-    });
-  });
-  const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
-
-  const reducedByBone = {};
-  Object.entries(keyframesByBone).forEach(([bone, kfs]) => {
-    reducedByBone[bone] = {};
-    kfs.forEach((kf, i) => {
-      if (i % STEP === 0 || i === kfs.length - 1)
-        reducedByBone[bone][parseFloat(kf.time.toFixed(4))] = kf;
-    });
-  });
-
-  // Serializar datos de rotacion por hueso como tabla Lua
-  const boneNames = ["HumanoidRootPart","LowerTorso","UpperTorso","Head",
-    "LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand",
-    "LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"];
-
+  // Serializar datos compactos: [qx,qy,qz,qw,px,py,pz] por frame por hueso
   let bonesLua = '';
-  boneNames.forEach(bone => {
-    const data = reducedByBone[bone];
-    if (!data) return;
-    const frames = sortedTimes.map(t => {
-      const kf = data[t];
-      if (!kf) return 'nil';
-      return `{${[kf.r00,kf.r01,kf.r02,kf.r10,kf.r11,kf.r12,kf.r20,kf.r21,kf.r22].map(v=>v.toFixed(5)).join(',')}}`;
-    }).join(',');
-    bonesLua += `  ["${bone}"]={${frames}},\n`;
+  BONE_ORDER.forEach(bone => {
+    const frames = boneFrames[bone];
+    if (!frames) return;
+    const data = frames.map(f =>
+      `{${f.qx.toFixed(5)},${f.qy.toFixed(5)},${f.qz.toFixed(5)},${f.qw.toFixed(5)},${f.px.toFixed(4)},${f.py.toFixed(4)},${f.pz.toFixed(4)}}`
+    ).join(',');
+    bonesLua += `  ["${bone}"]={${data}},\n`;
   });
 
-  const timesLua = `{${sortedTimes.map(t => t.toFixed(4)).join(',')}}`;
+  const timesLua = `{${times.map(t=>t.toFixed(4)).join(',')}}`;
 
-  return `-- Mixamo2Roblox v3.0 — Pega en View → Command Bar → Enter
-local animName = "${name}"
-local times = ${timesLua}
-local bdata = {
+  return `-- Mixamo2Roblox v4.0 — Pega en View → Command Bar → Enter
+-- ${times.length} keyframes | duracion: ${duration.toFixed(2)}s
+local N="${name}"
+local T=${timesLua}
+local B={
 ${bonesLua}}
-local hier = {LowerTorso="HumanoidRootPart",UpperTorso="LowerTorso",Head="UpperTorso",LeftUpperArm="UpperTorso",LeftLowerArm="LeftUpperArm",LeftHand="LeftLowerArm",RightUpperArm="UpperTorso",RightLowerArm="RightUpperArm",RightHand="RightLowerArm",LeftUpperLeg="LowerTorso",LeftLowerLeg="LeftUpperLeg",LeftFoot="LeftLowerLeg",RightUpperLeg="LowerTorso",RightLowerLeg="RightUpperLeg",RightFoot="RightLowerLeg"}
-local boneOrder = {"LowerTorso","UpperTorso","Head","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"}
-local model = nil
-local sel = game:GetService("Selection"):Get()
+local hier={LowerTorso="HumanoidRootPart",UpperTorso="LowerTorso",Head="UpperTorso",LeftUpperArm="UpperTorso",LeftLowerArm="LeftUpperArm",LeftHand="LeftLowerArm",RightUpperArm="UpperTorso",RightLowerArm="RightUpperArm",RightHand="RightLowerArm",LeftUpperLeg="LowerTorso",LeftLowerLeg="LeftUpperLeg",LeftFoot="LeftLowerLeg",RightUpperLeg="LowerTorso",RightLowerLeg="RightUpperLeg",RightFoot="RightLowerLeg"}
+local ord={"LowerTorso","UpperTorso","Head","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"}
+local model=nil
+local sel=game:GetService("Selection"):Get()
 if #sel>0 then local s=sel[1];if s:IsA("BasePart")then s=s.Parent end;if s:FindFirstChildOfClass("Humanoid")then model=s end end
 if not model then for _,v in ipairs(workspace:GetChildren())do if v:IsA("Model")and v:FindFirstChildOfClass("Humanoid")then model=v;break end end end
-if not model then warn("Selecciona un personaje primero");return end
--- Recopilar Motor6D del rig
-local motors = {}
-for _,v in ipairs(model:GetDescendants())do
-  if v:IsA("Motor6D") and v.Part1 then motors[v.Part1.Name]=v end
+if not model then warn("Selecciona un personaje");return end
+local old=workspace:FindFirstChild(N);if old then old:Destroy()end
+local ks=Instance.new("KeyframeSequence");ks.Name=N;ks.Loop=false;ks.Priority=Enum.AnimationPriority.Action
+local function mkpose(parent,bname,cf)
+  local p=Instance.new("Pose");p.Name=bname;p.CFrame=cf
+  p.EasingStyle=Enum.PoseEasingStyle.Linear;p.EasingDirection=Enum.PoseEasingDirection.In
+  p.Weight=1;p.Parent=parent;return p
 end
-local function m2cf(m) if not m then return CFrame.new() end return CFrame.new(0,0,0,m[1],m[2],m[3],m[4],m[5],m[6],m[7],m[8],m[9]) end
--- Referencia: primer frame de cada hueso (pose inicial de Mixamo)
-local ref={}
-for b,frames in pairs(bdata)do ref[b]=frames[1] end
-local old=workspace:FindFirstChild(animName);if old then old:Destroy() end
-local ks=Instance.new("KeyframeSequence");ks.Name=animName;ks.Loop=false;ks.Priority=Enum.AnimationPriority.Action
-local function mkpose(parent,bname,cf) local p=Instance.new("Pose");p.Name=bname;p.CFrame=cf;p.EasingStyle=Enum.PoseEasingStyle.Linear;p.EasingDirection=Enum.PoseEasingDirection.In;p.Weight=1;p.Parent=parent;return p end
-for ti,t in ipairs(times) do
+for ti,t in ipairs(T)do
   local kf=Instance.new("Keyframe");kf.Time=t
-  -- HumanoidRootPart: delta de rotacion global
-  local rootCF=CFrame.new()
-  if bdata.HumanoidRootPart and bdata.HumanoidRootPart[ti] then
-    rootCF = m2cf(ref.HumanoidRootPart):Inverse() * m2cf(bdata.HumanoidRootPart[ti])
-  end
-  local poses={HumanoidRootPart=mkpose(kf,"HumanoidRootPart",rootCF)}
-  -- Resto de huesos: usar C0 del Motor6D para corregir orientacion
-  for _,bname in ipairs(boneOrder) do
-    local frames=bdata[bname]
-    local parentPose=poses[hier[bname]] or poses.HumanoidRootPart
-    local boneCF=CFrame.new()
-    if frames and frames[ti] then
-      local delta = m2cf(ref[bname] or frames[1]):Inverse() * m2cf(frames[ti])
-      local motor=motors[bname]
-      if motor then
-        boneCF = motor.C0:Inverse() * delta * motor.C0
-      else
-        boneCF = delta
-      end
-    end
-    poses[bname]=mkpose(parentPose,bname,boneCF)
+  local poses={}
+  -- HumanoidRootPart siempre identidad (posicion la maneja Roblox)
+  poses["HumanoidRootPart"]=mkpose(kf,"HumanoidRootPart",CFrame.new())
+  for _,bn in ipairs(ord)do
+    local d=B[bn];if not d then poses[bn]=mkpose(poses[hier[bn]]or poses["HumanoidRootPart"],bn,CFrame.new());continue end
+    local f=d[ti];if not f then poses[bn]=mkpose(poses[hier[bn]]or poses["HumanoidRootPart"],bn,CFrame.new());continue end
+    -- Quaternion local directo de Mixamo (Three.js ya lo da en espacio local)
+    local qx,qy,qz,qw=f[1],f[2],f[3],f[4]
+    -- Correccion de ejes Mixamo(Y-up Z-fwd) → Roblox(Y-up -Z-fwd)
+    local cf=CFrame.new(f[5],f[6],-f[7]) * CFrame.new(0,0,0, qx,-qy,-qz,qw, -(-qy*-qy+-qz*-qz)*2+1, (-qy*qx+qw*-qz)*2, (-qz*qx-qw*-qy)*2, (-qy*qx-qw*-qz)*2, -(-qz*-qz+qx*qx)*2+1, (-qz*-qy+qw*qx)*2, (-qz*qx+qw*-qy)*2, (-qz*-qy-qw*qx)*2, -(qx*qx+-qy*-qy)*2+1)
+    -- Usar formula directa CFrame.fromMatrix equivalente
+    local x2=qx+qx;local y2=-qy+-qy;local z2=-qz+-qz
+    local xx=qx*x2;local xy=qx*y2;local xz=qx*z2
+    local yy=-qy*y2;local yz=-qy*z2;local zz=-qz*z2
+    local wx=qw*x2;local wy=qw*y2;local wz=qw*z2
+    cf=CFrame.new(f[5],f[6],-f[7], 1-(yy+zz),xy+wz,xz-wy, xy-wz,1-(xx+zz),yz+wx, xz+wy,yz-wx,1-(xx+yy))
+    poses[bn]=mkpose(poses[hier[bn]]or poses["HumanoidRootPart"],bn,cf)
   end
   kf.Parent=ks
 end
 ks.Parent=workspace
 game:GetService("Selection"):Set({ks})
-print("[Mixamo2Roblox] v3.0 OK: '"..animName.."' con ${sortedTimes.length} keyframes")
-print("Para probar: KeyframeSequenceProvider:RegisterKeyframeSequence(workspace."..animName..")")
-print("Para publicar: clic derecho en '"..animName.."' → Save to Roblox")
+local ksp=game:GetService("KeyframeSequenceProvider")
+local tid=ksp:RegisterKeyframeSequence(ks)
+local char=nil;for _,v in ipairs(workspace:GetChildren())do if v:IsA("Model")and v:FindFirstChildOfClass("Humanoid")then char=v;break end end
+if char then
+  local h=char:FindFirstChildOfClass("Humanoid")
+  local a=Instance.new("Animation");a.AnimationId=tid
+  local tr=h:LoadAnimation(a);tr:Play()
+  print("[M2R v4] Reproduciendo '"..N.."' directamente!")
+else
+  print("[M2R v4] KeyframeSequence '"..N.."' lista en Workspace")
+  print("Para reproducir: RegisterKeyframeSequence + LoadAnimation")
+end
+print("Para publicar: clic derecho en '"..N.."' → Save to Roblox")
 `;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).catch(() => {
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position="fixed"; ta.style.opacity="0";
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    document.execCommand("copy"); ta.remove();
+    const ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.opacity="0";
+    document.body.appendChild(ta);ta.focus();ta.select();document.execCommand("copy");ta.remove();
   });
-  const fb = document.getElementById("copyFeedback");
-  fb.style.display = "block";
-  setTimeout(() => fb.style.display = "none", 4000);
+  const fb=document.getElementById("copyFeedback");fb.style.display="block";
+  setTimeout(()=>fb.style.display="none",4000);
 }
 
 function downloadFile(content, filename) {
-  const blob = new Blob([content], { type:"application/xml" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href=url; a.download=filename; a.click();
-  URL.revokeObjectURL(url);
+  const blob=new Blob([content],{type:"text/plain"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);
 }
 
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+function delay(ms) { return new Promise(r=>setTimeout(r,ms)); }
 
-console.log("[Mixamo2Roblox] v2.0 con Three.js FBXLoader listo");
+console.log("[Mixamo2Roblox] v4.0 cargado");
