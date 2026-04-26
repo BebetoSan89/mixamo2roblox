@@ -166,7 +166,7 @@ async function handleFile(file) {
     await delay(200);
     const rbxanim = generateRbxanim(animData, originalFileName);
     convertedRbxanim = rbxanim;
-    convertedLuaScript = generateLuaScript(rbxanim, originalFileName);
+    convertedLuaScript = generateLuaScript(rbxanim, originalFileName, animData);
     setStep("step-export", "done", "listo");
     await delay(200);
 
@@ -329,23 +329,64 @@ function generateRbxanim(animData, name) {
 }
 
 // ── Generate Lua script ───────────────────────────────────────
-function generateLuaScript(rbxanimXml, animName) {
-  const escaped = rbxanimXml
-    .replace(/\\/g,"\\\\").replace(/"/g,'\\"')
-    .replace(/\n/g,"\\n").replace(/\r/g,"");
+function generateLuaScript(rbxanimXml, animName, animData) {
+  // En vez de pasar XML, crear la animacion directamente con KeyframeSequence API
+  const { keyframesByBone, duration } = animData;
 
-  return `-- Mixamo2Roblox v2.0 — Pega en View → Command Bar → Enter
-local animName="${animName||'MixamoAnim'}"
-local xmlData="${escaped}"
-local model=nil
-local sel=game:GetService("Selection"):Get()
-if #sel>0 then local s=sel[1];if s:IsA("BasePart")then s=s.Parent end;if s:FindFirstChildOfClass("Humanoid")then model=s end end
-if not model then for _,v in ipairs(workspace:GetChildren())do if v:IsA("Model")and v:FindFirstChildOfClass("Humanoid")then model=v;break end end end
-if not model then warn("[Mixamo2Roblox] Selecciona un personaje primero.");return end
-local e=model:FindFirstChild("MixamoAnim_"..animName);if e then e:Destroy()end
-local sv=Instance.new("StringValue");sv.Name="MixamoAnim_"..animName;sv.Value=xmlData;sv.Parent=model
-game:GetService("Selection"):Set({model})
-print("[Mixamo2Roblox] ✅ Listo en "..model.Name.." → Animation Editor → ··· → Import Animation")`;
+  // Reducir keyframes — tomar 1 de cada 3 para reducir tamaño
+  // manteniendo la animacion fluida
+  const STEP = 3;
+  let lines = [];
+
+  lines.push(`-- Mixamo2Roblox v2.1 — Pega en View → Command Bar → Enter`);
+  lines.push(`local name = "${animName || 'MixamoAnim'}"`);
+  lines.push(`local model = nil`);
+  lines.push(`local sel = game:GetService("Selection"):Get()`);
+  lines.push(`if #sel>0 then local s=sel[1];if s:IsA("BasePart")then s=s.Parent end;if s:FindFirstChildOfClass("Humanoid")then model=s end end`);
+  lines.push(`if not model then for _,v in ipairs(workspace:GetChildren())do if v:IsA("Model")and v:FindFirstChildOfClass("Humanoid")then model=v;break end end end`);
+  lines.push(`if not model then warn("Selecciona un personaje primero");return end`);
+  lines.push(`local ks = Instance.new("KeyframeSequence")`);
+  lines.push(`ks.Name = name`);
+  lines.push(`ks.Loop = false`);
+  lines.push(`ks.Priority = Enum.AnimationPriority.Action`);
+
+  // Recolectar todos los tiempos unicos reducidos
+  const allTimes = new Set();
+  Object.values(keyframesByBone).forEach(kfs => {
+    kfs.forEach((kf, i) => {
+      if (i % STEP === 0 || i === kfs.length - 1) allTimes.add(kf.time);
+    });
+  });
+  const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+
+  lines.push(`local kfs = {}`);
+
+  // Crear un Keyframe por tiempo
+  sortedTimes.forEach(t => {
+    const tFixed = t.toFixed(4);
+    lines.push(`kfs[${tFixed}] = Instance.new("Keyframe"); kfs[${tFixed}].Time = ${tFixed}; kfs[${tFixed}].Parent = ks`);
+  });
+
+  // Agregar poses por hueso
+  Object.entries(keyframesByBone).forEach(([boneName, kfs]) => {
+    const reduced = kfs.filter((kf, i) => i % STEP === 0 || i === kfs.length - 1);
+    reduced.forEach(kf => {
+      const t = kf.time.toFixed(4);
+      if (!allTimes.has(kf.time)) return;
+      // CFrame de rotacion
+      const cf = `CFrame.new(${kf.x.toFixed(3)},${kf.y.toFixed(3)},${kf.z.toFixed(3)},${kf.r00.toFixed(4)},${kf.r01.toFixed(4)},${kf.r02.toFixed(4)},${kf.r10.toFixed(4)},${kf.r11.toFixed(4)},${kf.r12.toFixed(4)},${kf.r20.toFixed(4)},${kf.r21.toFixed(4)},${kf.r22.toFixed(4)})`;
+      lines.push(`do local p=Instance.new("Pose");p.Name="${boneName}";p.CFrame=${cf};p.EasingStyle=Enum.PoseEasingStyle.Linear;p.Parent=kfs[${t}] end`);
+    });
+  });
+
+  lines.push(`local a = Instance.new("Animation")`);
+  lines.push(`a.Name = name`);
+  lines.push(`a.Parent = model`);
+  lines.push(`game:GetService("Selection"):Set({model})`);
+  lines.push(`print("[Mixamo2Roblox] Listo! KeyframeSequence creado en "..model.Name)`);
+  lines.push(`print("Ahora: selecciona el personaje → Animation Editor → ··· → Load → selecciona '"..name.."'")`);
+
+  return lines.join("\n");
 }
 
 // ── Utilities ─────────────────────────────────────────────────
