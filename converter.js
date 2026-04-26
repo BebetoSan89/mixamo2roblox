@@ -133,6 +133,11 @@ async function handleFile(file) {
     }
 
     const clip = object.animations[0];
+
+    // Debug: mostrar los primeros 10 tracks para diagnostico
+    console.log("[Mixamo2Roblox] Total tracks:", clip.tracks.length);
+    clip.tracks.slice(0, 10).forEach(t => console.log("  track:", t.name, "| times:", t.times.length));
+
     const mappedCount = countMappedBones(clip);
     setStep("step-bones", "done", `${mappedCount} huesos`);
     await delay(150);
@@ -142,7 +147,9 @@ async function handleFile(file) {
     await delay(200);
     const animData = extractAnimationData(clip);
     if (animData.totalKeyframes === 0) {
-      throw new Error("Se leyó el FBX pero no se encontraron keyframes válidos. Intenta descargar con Keyframe Reduction: None.");
+      // Mostrar tracks disponibles en el error para diagnostico
+      const trackNames = clip.tracks.slice(0,5).map(t=>t.name).join(", ");
+      throw new Error(`Se leyó el FBX pero no se encontraron keyframes válidos. Tracks encontrados: ${trackNames}. Intenta descargar con Keyframe Reduction: None.`);
     }
     setStep("step-keyframes", "done", `${animData.totalKeyframes} keyframes`);
     await delay(150);
@@ -190,28 +197,62 @@ function extractAnimationData(clip) {
   const boneData = {};
 
   clip.tracks.forEach(track => {
-    const parts    = track.name.split(".");
-    const boneName = parts[0];
-    const prop     = parts[1];
-    const roblox   = BONE_MAP[boneName];
-    if (!roblox) return;
+    // Three.js puede usar estos formatos de nombre:
+    // "mixamorig:Hips.quaternion"
+    // "mixamorig:Hips_rotationQuaternion"  
+    // "Hips.quaternion"
+    // Separar por ultimo punto
+    const lastDot = track.name.lastIndexOf(".");
+    let boneName, prop;
+
+    if (lastDot !== -1) {
+      boneName = track.name.substring(0, lastDot);
+      prop = track.name.substring(lastDot + 1).toLowerCase();
+    } else {
+      // Formato alternativo con guion bajo
+      const parts = track.name.split("_");
+      prop = parts[parts.length - 1].toLowerCase();
+      boneName = parts.slice(0, -1).join("_");
+    }
+
+    // Limpiar nombre del hueso (Three.js a veces agrega sufijos)
+    // Quitar numeros al final como "Hips_1"
+    boneName = boneName.replace(/_\d+$/, "");
+
+    const roblox = BONE_MAP[boneName];
+    if (!roblox) {
+      // Intentar sin prefijo mixamorig:
+      const clean = boneName.replace("mixamorig:", "");
+      const roblox2 = BONE_MAP[clean];
+      if (!roblox2) return;
+      if (!boneData[roblox2]) boneData[roblox2] = {};
+      boneData[roblox2][prop] = track;
+      return;
+    }
 
     if (!boneData[roblox]) boneData[roblox] = {};
     boneData[roblox][prop] = track;
   });
 
+  console.log("[Mixamo2Roblox] Huesos mapeados:", Object.keys(boneData));
+
   const keyframesByBone = {};
   let totalKeyframes = 0;
 
   Object.entries(boneData).forEach(([robloxBone, tracks]) => {
-    const qTrack = tracks["quaternion"];
-    const pTrack = tracks["position"];
-    if (!qTrack) return;
+    // Buscar track de rotacion (puede llamarse quaternion o rotation)
+    const qTrack = tracks["quaternion"] || tracks["rotation"] || tracks["rotationquaternion"];
+    const pTrack = tracks["position"] || tracks["translation"];
+    if (!qTrack) {
+      console.log("[Mixamo2Roblox] Sin track de rotacion para:", robloxBone, "tracks:", Object.keys(tracks));
+      return;
+    }
 
     const keyframes = [];
     for (let i = 0; i < qTrack.times.length; i++) {
       const t  = qTrack.times[i];
       const qi = i * 4;
+      if (qi + 3 >= qTrack.values.length) break;
       const qx = qTrack.values[qi];
       const qy = qTrack.values[qi+1];
       const qz = qTrack.values[qi+2];
@@ -219,7 +260,7 @@ function extractAnimationData(clip) {
       const mat = quatToMat(qx, qy, qz, qw);
 
       let px = 0, py = 0, pz = 0;
-      if (pTrack && i*3 < pTrack.values.length) {
+      if (pTrack && i*3+2 < pTrack.values.length) {
         px = pTrack.values[i*3]   / 10;
         py = pTrack.values[i*3+1] / 10;
         pz = pTrack.values[i*3+2] / 10;
