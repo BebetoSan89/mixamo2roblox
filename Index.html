@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mixamo2Roblox — Convierte animaciones FBX para Roblox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #18181f;
+    --border: #2a2a3a;
+    --accent: #7c6cfa;
+    --accent2: #fa6c9f;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(124,108,250,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,108,250,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Glow blobs */
+  .blob {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.18;
+  }
+  .blob1 { width: 500px; height: 500px; background: var(--accent); top: -150px; left: -150px; }
+  .blob2 { width: 400px; height: 400px; background: var(--accent2); bottom: -100px; right: -100px; }
+
+  /* Layout */
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* Nav */
+  nav {
+    padding: 20px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    position: relative; z-index: 1;
+  }
+
+  .logo {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.5px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .logo-dot { color: var(--accent); }
+  .logo-dot2 { color: var(--accent2); }
+
+  .nav-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  /* Hero */
+  .hero {
+    padding: 80px 0 60px;
+    text-align: center;
+  }
+
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid rgba(124,108,250,0.3);
+    padding: 5px 14px;
+    border-radius: 20px;
+    margin-bottom: 28px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .hero-tag::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1.05;
+    margin-bottom: 20px;
+  }
+
+  h1 .accent { color: var(--accent); }
+  h1 .accent2 { color: var(--accent2); }
+
+  .hero-sub {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 520px;
+    margin: 0 auto 48px;
+    line-height: 1.7;
+  }
+
+  /* Steps preview */
+  .steps-row {
+    display: flex;
+    gap: 0;
+    justify-content: center;
+    margin-bottom: 64px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .step-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--surface);
+  }
+
+  .step-chip .num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .step-arrow { color: var(--border); font-size: 16px; display: flex; align-items: center; padding: 0 4px; }
+
+  /* Main card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .card-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .card-header-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+
+  .card-header-text h2 {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
+  .card-header-text p {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .card-body { padding: 28px; }
+
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 56px 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: rgba(124,108,250,0.05);
+  }
+
+  .dropzone.drag-over { transform: scale(1.01); }
+
+  .drop-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+    filter: grayscale(0.3);
+  }
+
+  .drop-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+  }
+
+  .drop-sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .drop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .drop-btn:hover { opacity: 0.85; }
+
+  .drop-formats {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  input[type=file] { display: none; }
+
+  /* Progress */
+  .progress-wrap { display: none; }
+  .progress-wrap.visible { display: block; }
+
+  .progress-steps { display: flex; flex-direction: column; gap: 12px; }
+
+  .prog-step {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+
+  .prog-step.active { border-color: var(--accent); background: rgba(124,108,250,0.08); }
+  .prog-step.done { border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.05); }
+  .prog-step.error { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.05); }
+
+  .prog-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    transition: all 0.3s;
+  }
+
+  .prog-step.active .prog-icon { background: rgba(124,108,250,0.2); border-color: var(--accent); }
+  .prog-step.done .prog-icon { background: rgba(74,222,128,0.15); border-color: rgba(74,222,128,0.4); }
+
+  .prog-label { font-size: 14px; font-weight: 500; }
+  .prog-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .prog-status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  .prog-step.active .prog-status { background: rgba(124,108,250,0.2); color: var(--accent); }
+  .prog-step.done .prog-status { background: rgba(74,222,128,0.15); color: var(--green); }
+  .prog-step.error .prog-status { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  /* Spinner */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(124,108,250,0.3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Result */
+  .result-wrap { display: none; margin-top: 20px; }
+  .result-wrap.visible { display: block; }
+
+  .result-card {
+    background: rgba(74,222,128,0.06);
+    border: 1px solid rgba(74,222,128,0.25);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .result-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .result-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .result-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+
+  .stat-val {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--accent);
+    display: block;
+  }
+
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .download-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    letter-spacing: -0.3px;
+  }
+
+  .download-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .download-btn:active { transform: scale(0.99); }
+
+  .reset-btn {
+    width: 100%;
+    margin-top: 10px;
+    padding: 11px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .reset-btn:hover { border-color: var(--muted); color: var(--text); }
+
+  /* Info section */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  .info-card-icon { font-size: 24px; margin-bottom: 12px; display: block; }
+  .info-card h3 {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: -0.2px;
+  }
+  .info-card p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+  /* Instructions */
+  .instructions {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 28px;
+    margin-top: 20px;
+  }
+
+  .instructions h2 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 20px;
+  }
+
+  .inst-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .inst-step:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .inst-num {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: rgba(124,108,250,0.15);
+    border: 1px solid rgba(124,108,250,0.3);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .inst-body h4 { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .inst-body p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .inst-body code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--accent);
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+    position: relative; z-index: 1;
+  }
+
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* Error */
+  .error-card {
+    background: rgba(248,113,113,0.06);
+    border: 1px solid rgba(248,113,113,0.25);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 13px;
+    color: var(--red);
+    margin-top: 16px;
+    display: none;
+  }
+  .error-card.visible { display: block; }
+
+  /* Bone map table */
+  .bone-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  .bone-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .bone-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+  }
+  .bone-table tr:last-child td { border-bottom: none; }
+  .bone-table .from { color: var(--accent2); }
+  .bone-table .arrow { color: var(--muted); }
+  .bone-table .to { color: var(--accent); }
+
+  details { cursor: pointer; }
+  details summary { color: var(--muted); font-size: 13px; padding: 8px 0; list-style: none; display: flex; align-items: center; gap: 6px; }
+  details summary::before { content: '▶'; font-size: 10px; transition: transform 0.2s; }
+  details[open] summary::before { transform: rotate(90deg); }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 32px; }
+    .steps-row { gap: 6px; }
+    .step-arrow { display: none; }
+    .result-stats { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="blob blob1"></div>
+<div class="blob blob2"></div>
+
+<div class="container">
+  <nav>
+    <div class="logo">
+      <span class="logo-dot">Mixamo</span><span style="color:var(--muted)">2</span><span class="logo-dot2">Roblox</span>
+    </div>
+    <span class="nav-badge">v1.0 · gratis · open source</span>
+  </nav>
+
+  <div class="hero">
+    <div class="hero-tag">Conversor de animaciones</div>
+    <h1>Animaciones de <span class="accent">Mixamo</span><br>listas para <span class="accent2">Roblox</span></h1>
+    <p class="hero-sub">Sube tu archivo FBX de Mixamo y lo convertimos automáticamente al formato que Roblox entiende. Sin instalar nada, sin servidores, todo en tu navegador.</p>
+
+    <div class="steps-row">
+      <div class="step-chip"><span class="num">01</span> Descarga FBX de Mixamo</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">02</span> Sube aquí</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">03</span> Descarga .rbxanim</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">04</span> Importa en Studio</div>
+    </div>
+  </div>
+
+  <!-- Main converter card -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-header-icon">🔄</div>
+      <div class="card-header-text">
+        <h2>Convertidor FBX → RBXANIM</h2>
+        <p>Conversión completa en tu navegador · Privado · Sin límites</p>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Drop zone -->
+      <div class="dropzone" id="dropzone">
+        <span class="drop-icon">📦</span>
+        <div class="drop-title">Arrastra tu archivo FBX aquí</div>
+        <div class="drop-sub">O haz clic para seleccionarlo desde tu computadora</div>
+        <button class="drop-btn" onclick="document.getElementById('fileInput').click()">
+          Seleccionar archivo FBX
+        </button>
+        <div class="drop-formats">FORMATO SOPORTADO: .FBX (Mixamo · Without Skin · 30fps)</div>
+        <input type="file" id="fileInput" accept=".fbx">
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-steps">
+          <div class="prog-step" id="step-parse">
+            <div class="prog-icon">📂</div>
+            <div>
+              <div class="prog-label">Leyendo archivo FBX</div>
+              <div class="prog-detail">Extrayendo datos de animación y huesos</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-bones">
+            <div class="prog-icon">🦴</div>
+            <div>
+              <div class="prog-label">Traduciendo huesos</div>
+              <div class="prog-detail">Mixamo → nombres de Roblox R15</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-keyframes">
+            <div class="prog-icon">🎞️</div>
+            <div>
+              <div class="prog-label">Convirtiendo keyframes</div>
+              <div class="prog-detail">Transformando rotaciones y posiciones</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-export">
+            <div class="prog-icon">✅</div>
+            <div>
+              <div class="prog-label">Generando archivo .rbxanim</div>
+              <div class="prog-detail">Formato listo para Roblox Studio</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div class="error-card" id="errorCard"></div>
+
+      <!-- Result -->
+      <div class="result-wrap" id="resultWrap">
+        <div class="result-card">
+          <div class="result-title">✅ Conversión completada</div>
+          <div class="result-sub">Tu animación está lista para importar en Roblox Studio</div>
+
+          <div class="result-stats">
+            <div class="stat">
+              <span class="stat-val" id="statBones">—</span>
+              <div class="stat-lbl">Huesos</div>
+            </div>
+            <div class="stat">
+              <span class="stat-val" id="statFrames">—</span>
+              <div class="stat-lbl">Keyframes</div>
+            </div>
+            <div class="stat">
+              <span class="stat-val" id="statDuration">—</span>
+              <div class="stat-lbl">Duración</div>
+            </div>
+          </div>
+
+          <button class="download-btn" id="downloadBtn">
+            ⬇ Descargar archivo .rbxanim
+          </button>
+          <button class="download-btn" id="copyStudioBtn" style="background:linear-gradient(135deg,#fa6c9f,#7c6cfa);margin-top:10px;">
+            📋 Copiar para Studio
+          </button>
+          <div id="copyFeedback" style="display:none;text-align:center;margin-top:8px;font-size:13px;color:#4ade80;font-family:var(--font-mono);">✅ Copiado — pégalo en el plugin de Studio</div>
+          <button class="reset-btn" onclick="resetConverter()">Convertir otra animación</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Info grid -->
+  <div class="info-grid">
+    <div class="info-card">
+      <span class="info-card-icon">🔒</span>
+      <h3>100% privado</h3>
+      <p>Tu archivo nunca sale de tu navegador. Todo se procesa localmente, sin servidores.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-icon">⚡</span>
+      <h3>Conversión automática</h3>
+      <p>Traduce automáticamente los 16 huesos de Mixamo a los nombres correctos de Roblox R15.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-icon">🎮</span>
+      <h3>Compatible con Studio</h3>
+      <p>El archivo .rbxanim resultante se importa directo en el Animation Editor de Roblox Studio.</p>
+    </div>
+  </div>
+
+  <!-- Instructions -->
+  <div class="instructions">
+    <h2>Cómo usarlo</h2>
+
+    <div class="inst-step">
+      <div class="inst-num">1</div>
+      <div class="inst-body">
+        <h4>Descarga la animación de Mixamo</h4>
+        <p>Ve a <strong>mixamo.com</strong> → elige una animación → Download con estas opciones: <code>FBX Binary</code> · <code>Without Skin</code> · <code>30 FPS</code></p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">2</div>
+      <div class="inst-body">
+        <h4>Sube el FBX aquí</h4>
+        <p>Arrastra el archivo o usa el botón. La conversión tarda menos de 1 segundo.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">3</div>
+      <div class="inst-body">
+        <h4>Descarga el .rbxanim</h4>
+        <p>Haz clic en "Descargar archivo .rbxanim" y guárdalo en tu PC.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">4</div>
+      <div class="inst-body">
+        <h4>Importa en Roblox Studio</h4>
+        <p>Abre el <code>Animation Editor</code> en Studio → selecciona tu personaje R15 → haz clic en <code>···</code> → <code>Import Animation</code> → selecciona el .rbxanim descargado.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">5</div>
+      <div class="inst-body">
+        <h4>Publica y copia el ID</h4>
+        <p>En el Animation Editor haz clic en <code>Publish</code> para subir la animación a tu cuenta de Roblox y obtener el Animation ID para usar en tus scripts.</p>
+      </div>
+    </div>
+
+    <details style="margin-top:16px;">
+      <summary>Ver tabla de conversión de huesos Mixamo → Roblox</summary>
+      <table class="bone-table">
+        <thead>
+          <tr><th>Mixamo</th><th></th><th>Roblox R15</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="from">Hips</td><td class="arrow">→</td><td class="to">HumanoidRootPart</td></tr>
+          <tr><td class="from">Spine / Spine1</td><td class="arrow">→</td><td class="to">LowerTorso</td></tr>
+          <tr><td class="from">Spine2</td><td class="arrow">→</td><td class="to">UpperTorso</td></tr>
+          <tr><td class="from">Neck / Head</td><td class="arrow">→</td><td class="to">Head</td></tr>
+          <tr><td class="from">LeftShoulder / LeftArm</td><td class="arrow">→</td><td class="to">LeftUpperArm</td></tr>
+          <tr><td class="from">LeftForeArm</td><td class="arrow">→</td><td class="to">LeftLowerArm</td></tr>
+          <tr><td class="from">LeftHand</td><td class="arrow">→</td><td class="to">LeftHand</td></tr>
+          <tr><td class="from">RightShoulder / RightArm</td><td class="arrow">→</td><td class="to">RightUpperArm</td></tr>
+          <tr><td class="from">RightForeArm</td><td class="arrow">→</td><td class="to">RightLowerArm</td></tr>
+          <tr><td class="from">RightHand</td><td class="arrow">→</td><td class="to">RightHand</td></tr>
+          <tr><td class="from">LeftUpLeg</td><td class="arrow">→</td><td class="to">LeftUpperLeg</td></tr>
+          <tr><td class="from">LeftLeg</td><td class="arrow">→</td><td class="to">LeftLowerLeg</td></tr>
+          <tr><td class="from">LeftFoot</td><td class="arrow">→</td><td class="to">LeftFoot</td></tr>
+          <tr><td class="from">RightUpLeg</td><td class="arrow">→</td><td class="to">RightUpperLeg</td></tr>
+          <tr><td class="from">RightLeg</td><td class="arrow">→</td><td class="to">RightLowerLeg</td></tr>
+          <tr><td class="from">RightFoot</td><td class="arrow">→</td><td class="to">RightFoot</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+  <footer>
+    Hecho con ❤️ para la comunidad de Roblox · 
+    <a href="https://github.com" target="_blank">Ver en GitHub</a> · 
+    Gratis y open source para siempre
+  </footer>
+</div>
+
+<script src="converter.js"></script>
+</body>
+</html>
