@@ -373,7 +373,6 @@ function generateLuaScript(rbxanimXml, animName, animData) {
   const STEP = 3;
   const name = (animName || 'MixamoAnim').replace(/[^a-zA-Z0-9_]/g, '_');
 
-  // Recolectar tiempos unicos reducidos
   const allTimes = new Set();
   Object.values(keyframesByBone).forEach(kfs => {
     kfs.forEach((kf, i) => {
@@ -382,154 +381,90 @@ function generateLuaScript(rbxanimXml, animName, animData) {
   });
   const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
 
-  // Construir mapa de keyframes por hueso reducido
   const reducedByBone = {};
   Object.entries(keyframesByBone).forEach(([bone, kfs]) => {
     reducedByBone[bone] = {};
     kfs.forEach((kf, i) => {
-      if (i % STEP === 0 || i === kfs.length - 1) {
-        const t = parseFloat(kf.time.toFixed(4));
-        reducedByBone[bone][t] = kf;
-      }
+      if (i % STEP === 0 || i === kfs.length - 1)
+        reducedByBone[bone][parseFloat(kf.time.toFixed(4))] = kf;
     });
   });
 
-  // Generar el script en bloques para evitar el limite de 100k chars
-  // Dividimos en chunks de 50 keyframes
-  const CHUNK = 50;
-  const chunks = [];
-  for (let i = 0; i < sortedTimes.length; i += CHUNK) {
-    chunks.push(sortedTimes.slice(i, i + CHUNK));
-  }
+  // Serializar datos de rotacion por hueso como tabla Lua
+  const boneNames = ["HumanoidRootPart","LowerTorso","UpperTorso","Head",
+    "LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand",
+    "LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"];
 
-  let script = `-- Mixamo2Roblox v2.2 — Pega en View → Command Bar → Enter
+  let bonesLua = '';
+  boneNames.forEach(bone => {
+    const data = reducedByBone[bone];
+    if (!data) return;
+    const frames = sortedTimes.map(t => {
+      const kf = data[t];
+      if (!kf) return 'nil';
+      return `{${[kf.r00,kf.r01,kf.r02,kf.r10,kf.r11,kf.r12,kf.r20,kf.r21,kf.r22].map(v=>v.toFixed(5)).join(',')}}`;
+    }).join(',');
+    bonesLua += `  ["${bone}"]={${frames}},\n`;
+  });
+
+  const timesLua = `{${sortedTimes.map(t => t.toFixed(4)).join(',')}}`;
+
+  return `-- Mixamo2Roblox v3.0 — Pega en View → Command Bar → Enter
 local animName = "${name}"
+local times = ${timesLua}
+local bdata = {
+${bonesLua}}
+local hier = {LowerTorso="HumanoidRootPart",UpperTorso="LowerTorso",Head="UpperTorso",LeftUpperArm="UpperTorso",LeftLowerArm="LeftUpperArm",LeftHand="LeftLowerArm",RightUpperArm="UpperTorso",RightLowerArm="RightUpperArm",RightHand="RightLowerArm",LeftUpperLeg="LowerTorso",LeftLowerLeg="LeftUpperLeg",LeftFoot="LeftLowerLeg",RightUpperLeg="LowerTorso",RightLowerLeg="RightUpperLeg",RightFoot="RightLowerLeg"}
+local boneOrder = {"LowerTorso","UpperTorso","Head","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"}
 local model = nil
 local sel = game:GetService("Selection"):Get()
-if #sel > 0 then
-  local s = sel[1]
-  if s:IsA("BasePart") then s = s.Parent end
-  if s:FindFirstChildOfClass("Humanoid") then model = s end
+if #sel>0 then local s=sel[1];if s:IsA("BasePart")then s=s.Parent end;if s:FindFirstChildOfClass("Humanoid")then model=s end end
+if not model then for _,v in ipairs(workspace:GetChildren())do if v:IsA("Model")and v:FindFirstChildOfClass("Humanoid")then model=v;break end end end
+if not model then warn("Selecciona un personaje primero");return end
+-- Recopilar Motor6D del rig
+local motors = {}
+for _,v in ipairs(model:GetDescendants())do
+  if v:IsA("Motor6D") and v.Part1 then motors[v.Part1.Name]=v end
 end
-if not model then
-  for _, v in ipairs(workspace:GetChildren()) do
-    if v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") then
-      model = v; break
-    end
+local function m2cf(m) if not m then return CFrame.new() end return CFrame.new(0,0,0,m[1],m[2],m[3],m[4],m[5],m[6],m[7],m[8],m[9]) end
+-- Referencia: primer frame de cada hueso (pose inicial de Mixamo)
+local ref={}
+for b,frames in pairs(bdata)do ref[b]=frames[1] end
+local old=workspace:FindFirstChild(animName);if old then old:Destroy() end
+local ks=Instance.new("KeyframeSequence");ks.Name=animName;ks.Loop=false;ks.Priority=Enum.AnimationPriority.Action
+local function mkpose(parent,bname,cf) local p=Instance.new("Pose");p.Name=bname;p.CFrame=cf;p.EasingStyle=Enum.PoseEasingStyle.Linear;p.EasingDirection=Enum.PoseEasingDirection.In;p.Weight=1;p.Parent=parent;return p end
+for ti,t in ipairs(times) do
+  local kf=Instance.new("Keyframe");kf.Time=t
+  -- HumanoidRootPart: delta de rotacion global
+  local rootCF=CFrame.new()
+  if bdata.HumanoidRootPart and bdata.HumanoidRootPart[ti] then
+    rootCF = m2cf(ref.HumanoidRootPart):Inverse() * m2cf(bdata.HumanoidRootPart[ti])
   end
+  local poses={HumanoidRootPart=mkpose(kf,"HumanoidRootPart",rootCF)}
+  -- Resto de huesos: usar C0 del Motor6D para corregir orientacion
+  for _,bname in ipairs(boneOrder) do
+    local frames=bdata[bname]
+    local parentPose=poses[hier[bname]] or poses.HumanoidRootPart
+    local boneCF=CFrame.new()
+    if frames and frames[ti] then
+      local delta = m2cf(ref[bname] or frames[1]):Inverse() * m2cf(frames[ti])
+      local motor=motors[bname]
+      if motor then
+        boneCF = motor.C0:Inverse() * delta * motor.C0
+      else
+        boneCF = delta
+      end
+    end
+    poses[bname]=mkpose(parentPose,bname,boneCF)
+  end
+  kf.Parent=ks
 end
-if not model then warn("[Mixamo2Roblox] Selecciona un personaje primero"); return end
-
--- Limpiar animacion anterior
-local old = workspace:FindFirstChild(animName)
-if old then old:Destroy() end
-
-local ks = Instance.new("KeyframeSequence")
-ks.Name = animName
-ks.Loop = false
-ks.Priority = Enum.AnimationPriority.Action
-
-local function addPose(parent, boneName, cf)
-  local p = Instance.new("Pose")
-  p.Name = boneName
-  p.CFrame = cf
-  p.EasingStyle = Enum.PoseEasingStyle.Linear
-  p.EasingDirection = Enum.PoseEasingDirection.In
-  p.Weight = 1
-  p.Parent = parent
-  return p
-end
-
-local function makeKeyframe(t)
-  local kf = Instance.new("Keyframe")
-  kf.Time = t
-  kf.Parent = ks
-  return kf
-end
-
-`;
-
-  const identity = {r00:1,r01:0,r02:0,r10:0,r11:1,r12:0,r20:0,r21:0,r22:1,x:0,y:0,z:0};
-
-  const mul = (a, b) => ({
-    r00: a.r00*b.r00+a.r01*b.r10+a.r02*b.r20, r01: a.r00*b.r01+a.r01*b.r11+a.r02*b.r21, r02: a.r00*b.r02+a.r01*b.r12+a.r02*b.r22,
-    r10: a.r10*b.r00+a.r11*b.r10+a.r12*b.r20, r11: a.r10*b.r01+a.r11*b.r11+a.r12*b.r21, r12: a.r10*b.r02+a.r11*b.r12+a.r12*b.r22,
-    r20: a.r20*b.r00+a.r21*b.r10+a.r22*b.r20, r21: a.r20*b.r01+a.r21*b.r11+a.r22*b.r21, r22: a.r20*b.r02+a.r21*b.r12+a.r22*b.r22,
-    x: a.r00*b.x+a.r01*b.y+a.r02*b.z+a.x, y: a.r10*b.x+a.r11*b.y+a.r12*b.z+a.y, z: a.r20*b.x+a.r21*b.y+a.r22*b.z+a.z,
-  });
-  const inv = (m) => ({
-    r00:m.r00, r01:m.r10, r02:m.r20,
-    r10:m.r01, r11:m.r11, r12:m.r21,
-    r20:m.r02, r21:m.r12, r22:m.r22,
-    x:-(m.r00*m.x+m.r10*m.y+m.r20*m.z),
-    y:-(m.r01*m.x+m.r11*m.y+m.r21*m.z),
-    z:-(m.r02*m.x+m.r12*m.y+m.r22*m.z),
-  });
-
-  const getMat = (bone, t) => (reducedByBone[bone] && reducedByBone[bone][t]) || identity;
-
-  // Obtener la pose inicial (t=0) de cada hueso para usarla como referencia
-  const t0 = sortedTimes[0];
-  const initialPose = {};
-  Object.keys(BONE_HIERARCHY).forEach(bone => {
-    initialPose[bone] = getMat(bone, t0);
-  });
-
-  // CFrame relativo a Roblox:
-  // 1. Restar pose inicial del hueso (inv(initial) * current) = delta de rotacion
-  // 2. Luego hacerlo relativo al padre: inv(parentDelta) * childDelta
-  const getDelta = (bone, t) => {
-    const current = getMat(bone, t);
-    const initial = initialPose[bone];
-    return mul(inv(initial), current);
-  };
-
-  const getRelCF = (bone, t) => {
-    const parent = BONE_HIERARCHY[bone];
-    const childDelta = getDelta(bone, t);
-    if (!parent) return childDelta;
-    const parentDelta = getDelta(parent, t);
-    return mul(inv(parentDelta), childDelta);
-  };
-
-  const toCF = (m) =>
-    `CFrame.new(0,0,0,${m.r00.toFixed(5)},${m.r01.toFixed(5)},${m.r02.toFixed(5)},${m.r10.toFixed(5)},${m.r11.toFixed(5)},${m.r12.toFixed(5)},${m.r20.toFixed(5)},${m.r21.toFixed(5)},${m.r22.toFixed(5)})`;
-
-  // Generar keyframes con jerarquia correcta
-  sortedTimes.forEach(t => {
-    const tStr = t.toFixed(4);
-    const getCF = (bone) => toCF(getRelCF(bone, t));
-
-    script += `do -- t=${tStr}
-local kf=makeKeyframe(${tStr})
-local root=addPose(kf,"HumanoidRootPart",${getCF("HumanoidRootPart")})
-local lt=addPose(root,"LowerTorso",${getCF("LowerTorso")})
-local ut=addPose(lt,"UpperTorso",${getCF("UpperTorso")})
-addPose(ut,"Head",${getCF("Head")})
-local lua=addPose(ut,"LeftUpperArm",${getCF("LeftUpperArm")})
-local lla=addPose(lua,"LeftLowerArm",${getCF("LeftLowerArm")})
-addPose(lla,"LeftHand",${getCF("LeftHand")})
-local rua=addPose(ut,"RightUpperArm",${getCF("RightUpperArm")})
-local rla=addPose(rua,"RightLowerArm",${getCF("RightLowerArm")})
-addPose(rla,"RightHand",${getCF("RightHand")})
-local lul=addPose(lt,"LeftUpperLeg",${getCF("LeftUpperLeg")})
-local lll=addPose(lul,"LeftLowerLeg",${getCF("LeftLowerLeg")})
-addPose(lll,"LeftFoot",${getCF("LeftFoot")})
-local rul=addPose(lt,"RightUpperLeg",${getCF("RightUpperLeg")})
-local rll=addPose(rul,"RightLowerLeg",${getCF("RightLowerLeg")})
-addPose(rll,"RightFoot",${getCF("RightFoot")})
-end
-`;
-  });
-
-  script += `
-ks.Parent = workspace
+ks.Parent=workspace
 game:GetService("Selection"):Set({ks})
-print("[Mixamo2Roblox] KeyframeSequence '"..animName.."' creada con ${sortedTimes.length} keyframes")
-print("Ahora: clic derecho en '"..animName.."' en el Explorador → Save to Roblox → copia el ID")
+print("[Mixamo2Roblox] v3.0 OK: '"..animName.."' con ${sortedTimes.length} keyframes")
+print("Para probar: KeyframeSequenceProvider:RegisterKeyframeSequence(workspace."..animName..")")
+print("Para publicar: clic derecho en '"..animName.."' → Save to Roblox")
 `;
-
-  return script;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
