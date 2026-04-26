@@ -1,692 +1,809 @@
-// ============================================================
-//  converter.js  —  Mixamo FBX → Roblox .rbxanim
-//  Corre 100% en el navegador, sin servidores
-// ============================================================
-
-// Tabla de conversion de huesos Mixamo → Roblox R15
-const BONE_MAP = {
-  "Hips":             "HumanoidRootPart",
-  "Spine":            "LowerTorso",
-  "Spine1":           "LowerTorso",
-  "Spine2":           "UpperTorso",
-  "Neck":             "Head",
-  "Head":             "Head",
-  "LeftShoulder":     "LeftUpperArm",
-  "LeftArm":          "LeftUpperArm",
-  "LeftForeArm":      "LeftLowerArm",
-  "LeftHand":         "LeftHand",
-  "RightShoulder":    "RightUpperArm",
-  "RightArm":         "RightUpperArm",
-  "RightForeArm":     "RightLowerArm",
-  "RightHand":        "RightHand",
-  "LeftUpLeg":        "LeftUpperLeg",
-  "LeftLeg":          "LeftLowerLeg",
-  "LeftFoot":         "LeftFoot",
-  "LeftToeBase":      "LeftFoot",
-  "RightUpLeg":       "RightUpperLeg",
-  "RightLeg":         "RightLowerLeg",
-  "RightFoot":        "RightFoot",
-  "RightToeBase":     "RightFoot",
-  // Variantes con prefijo mixamorig:
-  "mixamorig:Hips":           "HumanoidRootPart",
-  "mixamorig:Spine":          "LowerTorso",
-  "mixamorig:Spine1":         "LowerTorso",
-  "mixamorig:Spine2":         "UpperTorso",
-  "mixamorig:Neck":           "Head",
-  "mixamorig:Head":           "Head",
-  "mixamorig:LeftShoulder":   "LeftUpperArm",
-  "mixamorig:LeftArm":        "LeftUpperArm",
-  "mixamorig:LeftForeArm":    "LeftLowerArm",
-  "mixamorig:LeftHand":       "LeftHand",
-  "mixamorig:RightShoulder":  "RightUpperArm",
-  "mixamorig:RightArm":       "RightUpperArm",
-  "mixamorig:RightForeArm":   "RightLowerArm",
-  "mixamorig:RightHand":      "RightHand",
-  "mixamorig:LeftUpLeg":      "LeftUpperLeg",
-  "mixamorig:LeftLeg":        "LeftLowerLeg",
-  "mixamorig:LeftFoot":       "LeftFoot",
-  "mixamorig:RightUpLeg":     "RightUpperLeg",
-  "mixamorig:RightLeg":       "RightLowerLeg",
-  "mixamorig:RightFoot":      "RightFoot",
-};
-
-// Estado global
-let convertedData = null;
-let originalFileName = "";
-
-// ── UI helpers ──────────────────────────────────────────────
-
-function setStep(id, state, statusText) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = "prog-step " + state;
-  const status = el.querySelector(".prog-status");
-  if (status) {
-    status.textContent = statusText;
-    if (state === "active") {
-      status.innerHTML = '<span class="spinner"></span>';
-    }
-  }
-  const icon = el.querySelector(".prog-icon");
-  if (icon) {
-    if (state === "done") icon.textContent = "✅";
-    else if (state === "error") icon.textContent = "❌";
-  }
-}
-
-function showError(msg) {
-  const card = document.getElementById("errorCard");
-  card.textContent = "❌ Error: " + msg;
-  card.classList.add("visible");
-}
-
-function resetConverter() {
-  document.getElementById("dropzone").style.display = "block";
-  document.getElementById("progressWrap").classList.remove("visible");
-  document.getElementById("resultWrap").classList.remove("visible");
-  document.getElementById("errorCard").classList.remove("visible");
-  ["step-parse","step-bones","step-keyframes","step-export"].forEach(id => {
-    setStep(id, "", "esperando");
-    const el = document.getElementById(id);
-    if (el) {
-      const icons = ["📂","🦴","🎞️","✅"];
-      const idx = ["step-parse","step-bones","step-keyframes","step-export"].indexOf(id);
-      const icon = el.querySelector(".prog-icon");
-      if (icon) icon.textContent = icons[idx];
-    }
-  });
-  convertedData = null;
-}
-
-// ── Drag & Drop ──────────────────────────────────────────────
-
-const dropzone = document.getElementById("dropzone");
-const fileInput = document.getElementById("fileInput");
-
-dropzone.addEventListener("dragover", e => {
-  e.preventDefault();
-  dropzone.classList.add("drag-over");
-});
-
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
-
-dropzone.addEventListener("drop", e => {
-  e.preventDefault();
-  dropzone.classList.remove("drag-over");
-  const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
-});
-
-fileInput.addEventListener("change", e => {
-  if (e.target.files[0]) handleFile(e.target.files[0]);
-});
-
-dropzone.addEventListener("click", e => {
-  if (e.target.tagName !== "BUTTON") fileInput.click();
-});
-
-// ── Main handler ─────────────────────────────────────────────
-
-async function handleFile(file) {
-  if (!file.name.toLowerCase().endsWith(".fbx")) {
-    showError("El archivo debe ser .fbx — descárgalo de Mixamo con formato FBX Binary.");
-    return;
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mixamo2Roblox — Convierte animaciones FBX para Roblox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #18181f;
+    --border: #2a2a3a;
+    --accent: #7c6cfa;
+    --accent2: #fa6c9f;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', monospace;
   }
 
-  originalFileName = file.name.replace(/\.fbx$/i, "");
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  dropzone.style.display = "none";
-  document.getElementById("progressWrap").classList.add("visible");
-  document.getElementById("errorCard").classList.remove("visible");
-
-  try {
-    // PASO 1: Leer archivo
-    setStep("step-parse", "active", "");
-    await delay(300);
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-
-    // Detectar si es FBX binario o ASCII
-    const isBinary = checkFBXBinary(bytes);
-    let parsed;
-
-    if (isBinary) {
-      parsed = parseFBXBinary(bytes);
-    } else {
-      const text = new TextDecoder("utf-8").decode(bytes);
-      parsed = parseFBXAscii(text);
-    }
-
-    if (!parsed || !parsed.takes || parsed.takes.length === 0) {
-      throw new Error("No se encontraron animaciones en el archivo. Asegúrate de descargar con 'Without Skin' desde Mixamo.");
-    }
-
-    setStep("step-parse", "done", "listo");
-    await delay(200);
-
-    // PASO 2: Traducir huesos
-    setStep("step-bones", "active", "");
-    await delay(400);
-
-    const translated = translateBones(parsed);
-    if (translated.mappedBones === 0) {
-      throw new Error("No se reconocieron huesos de Mixamo. Verifica que el FBX sea de Mixamo (Without Skin).");
-    }
-
-    setStep("step-bones", "done", `${translated.mappedBones} huesos`);
-    await delay(200);
-
-    // PASO 3: Convertir keyframes
-    setStep("step-keyframes", "active", "");
-    await delay(500);
-
-    const anim = buildAnimation(translated);
-
-    setStep("step-keyframes", "done", `${anim.totalKeyframes} keyframes`);
-    await delay(200);
-
-    // PASO 4: Generar .rbxanim
-    setStep("step-export", "active", "");
-    await delay(300);
-
-    const rbxanim = generateRbxanim(anim);
-    convertedData = rbxanim;
-
-    setStep("step-export", "done", "listo");
-    await delay(300);
-
-    // Mostrar resultado
-    document.getElementById("statBones").textContent = translated.mappedBones;
-    document.getElementById("statFrames").textContent = anim.totalKeyframes;
-    document.getElementById("statDuration").textContent = anim.duration.toFixed(1) + "s";
-
-    document.getElementById("resultWrap").classList.add("visible");
-
-    document.getElementById("downloadBtn").onclick = () => downloadFile(rbxanim, originalFileName + ".rbxanim");
-
-    document.getElementById("copyStudioBtn").onclick = () => {
-      // Generar script de Lua que crea la animacion directamente en Studio
-      const luaScript = generateLuaScript(rbxanim, originalFileName);
-      const ta = document.createElement("textarea");
-      ta.value = luaScript;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch(e) {}
-      ta.remove();
-      navigator.clipboard.writeText(luaScript).catch(() => {});
-      const fb = document.getElementById("copyFeedback");
-      fb.style.display = "block";
-      setTimeout(() => fb.style.display = "none", 4000);
-    };
-
-  } catch (err) {
-    console.error(err);
-    setStep("step-parse", "error", "error");
-    showError(err.message || "Error desconocido al procesar el archivo.");
-  }
-}
-
-// ── FBX Detection ────────────────────────────────────────────
-
-function checkFBXBinary(bytes) {
-  const magic = "Kaydara FBX Binary  ";
-  for (let i = 0; i < magic.length; i++) {
-    if (bytes[i] !== magic.charCodeAt(i)) return false;
-  }
-  return true;
-}
-
-// ── FBX ASCII Parser ─────────────────────────────────────────
-
-function parseFBXAscii(text) {
-  const result = { takes: [], bones: new Set() };
-
-  // Extraer takes (animaciones)
-  const takeRegex = /Take:\s*"([^"]+)"/g;
-  const takes = [];
-  let tm;
-  while ((tm = takeRegex.exec(text)) !== null) {
-    takes.push(tm[1]);
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
   }
 
-  // Extraer curvas de animacion
-  const curves = [];
-
-  // Buscar nodos AnimationCurveNode con Channel (Lcl Rotation, etc.)
-  const nodeRegex = /Model:\s*"([^"]+)"[^{]*\{[^}]*AnimationCurveNode[^}]*Channel:\s*"([^"]+)"[^}]*(\{[^}]+\})/gs;
-
-  // Metodo alternativo: buscar KeyTime y KeyValueFloat en bloques
-  const blockRegex = /Channel:\s*"([^"]*)"[\s\S]*?KeyTime:\s*\{([\s\S]*?)\}[\s\S]*?KeyValueFloat:\s*\{([\s\S]*?)\}/g;
-
-  let bm;
-  while ((bm = blockRegex.exec(text)) !== null) {
-    const channel = bm[1].trim();
-    const timesRaw = bm[2].replace(/\s+/g, ' ').trim().split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-    const valuesRaw = bm[3].replace(/\s+/g, ' ').trim().split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-    if (timesRaw.length > 0 && valuesRaw.length > 0) {
-      curves.push({ channel, times: timesRaw, values: valuesRaw });
-    }
+  /* Grid bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(124,108,250,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,108,250,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
   }
 
-  // Extraer nombres de huesos
-  const boneRegex = /Model:\s*"mixamorig:([^"]+)"|Model:\s*"([A-Z][a-zA-Z]+)"/g;
-  let bone;
-  while ((bone = boneRegex.exec(text)) !== null) {
-    const name = bone[1] || bone[2];
-    if (name && BONE_MAP["mixamorig:" + name] || BONE_MAP[name]) {
-      result.bones.add(bone[1] ? "mixamorig:" + name : name);
-    }
+  /* Glow blobs */
+  .blob {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.18;
+  }
+  .blob1 { width: 500px; height: 500px; background: var(--accent); top: -150px; left: -150px; }
+  .blob2 { width: 400px; height: 400px; background: var(--accent2); bottom: -100px; right: -100px; }
+
+  /* Layout */
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* Nav */
+  nav {
+    padding: 20px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    position: relative; z-index: 1;
   }
 
-  result.takes = takes.length > 0 ? [{ name: takes[0], curves }] : [{ name: "animation", curves }];
-  return result;
-}
-
-// ── FBX Binary Parser (simplificado) ────────────────────────
-
-function parseFBXBinary(bytes) {
-  // Leer version
-  const view = new DataView(bytes.buffer);
-  const version = view.getUint32(23, true);
-
-  const result = { takes: [], bones: new Set(), version };
-
-  // Leer strings del archivo binario para encontrar nombres de huesos y curvas
-  const text = extractStringsFromBinary(bytes);
-
-  // Usar el mismo parser de ASCII sobre el texto extraido
-  const asciiLike = text;
-
-  // Encontrar huesos conocidos de Mixamo
-  const boneNames = Object.keys(BONE_MAP);
-  const foundBones = new Set();
-  boneNames.forEach(b => {
-    if (asciiLike.includes(b)) foundBones.add(b);
-  });
-
-  result.bones = foundBones;
-
-  // Extraer datos de curvas del binario
-  const curves = extractCurvesBinary(bytes, view, version);
-
-  result.takes = [{ name: "MixamoAnimation", curves, bones: Array.from(foundBones) }];
-  return result;
-}
-
-function extractStringsFromBinary(bytes) {
-  let result = "";
-  let i = 27; // saltar header
-  const len = Math.min(bytes.length, 500000);
-
-  while (i < len) {
-    if (bytes[i] >= 32 && bytes[i] < 127) {
-      let str = "";
-      while (i < len && bytes[i] >= 32 && bytes[i] < 127) {
-        str += String.fromCharCode(bytes[i]);
-        i++;
-      }
-      if (str.length > 2) result += str + "\n";
-    } else {
-      i++;
-    }
-  }
-  return result;
-}
-
-function extractCurvesBinary(bytes, view, version) {
-  // Parsear nodos FBX binario
-  const curves = [];
-  const nodeSize = version >= 7500 ? 25 : 13;
-
-  try {
-    let offset = 27;
-
-    function readNode(offset) {
-      if (offset + nodeSize > bytes.length) return null;
-
-      let endOffset, numProps, propsLen, nameLen;
-      if (version >= 7500) {
-        endOffset = Number(view.getBigUint64(offset, true));
-        numProps = Number(view.getBigUint64(offset + 8, true));
-        propsLen = Number(view.getBigUint64(offset + 16, true));
-        nameLen = bytes[offset + 24];
-      } else {
-        endOffset = view.getUint32(offset, true);
-        numProps = view.getUint32(offset + 4, true);
-        propsLen = view.getUint32(offset + 8, true);
-        nameLen = bytes[offset + 12];
-      }
-
-      if (endOffset === 0) return null;
-
-      const nameStart = offset + nodeSize;
-      if (nameStart + nameLen > bytes.length) return null;
-
-      const name = String.fromCharCode(...bytes.slice(nameStart, nameStart + nameLen));
-      const propsStart = nameStart + nameLen;
-
-      return { name, endOffset, numProps, propsLen, propsStart };
-    }
-
-    // Buscar KeyTime y KeyValueFloat arrays
-    const fbxText = extractStringsFromBinary(bytes);
-    const timeMatches = fbxText.matchAll(/KeyTime[^\n]*/g);
-    // Si no podemos parsear el binario, generar curva de ejemplo
-    if (curves.length === 0) {
-      curves.push({
-        boneName: "Hips",
-        channel: "Lcl Rotation",
-        component: "X",
-        times: [0, 0.033, 0.066],
-        values: [0, 0, 0]
-      });
-    }
-  } catch (e) {
-    console.warn("Binary parse warning:", e);
+  .logo {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.5px;
+    display: flex; align-items: center; gap: 8px;
   }
 
-  return curves;
-}
+  .logo-dot { color: var(--accent); }
+  .logo-dot2 { color: var(--accent2); }
 
-// ── Bone Translation ─────────────────────────────────────────
-
-function translateBones(parsed) {
-  const result = {
-    takes: [],
-    mappedBones: 0,
-    boneMapping: {}
-  };
-
-  const mapped = new Set();
-
-  parsed.bones.forEach(boneName => {
-    const robloxName = BONE_MAP[boneName];
-    if (robloxName && !mapped.has(robloxName)) {
-      result.boneMapping[boneName] = robloxName;
-      mapped.add(robloxName);
-      result.mappedBones++;
-    }
-  });
-
-  // Si no encontramos huesos directamente, asumir mapeo estandar
-  if (result.mappedBones === 0) {
-    Object.entries(BONE_MAP).forEach(([mixamo, roblox]) => {
-      if (!result.boneMapping[mixamo]) {
-        result.boneMapping[mixamo] = roblox;
-      }
-    });
-    result.mappedBones = 16;
+  .nav-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
   }
 
-  result.takes = parsed.takes;
-  return result;
-}
-
-// ── Animation Builder ────────────────────────────────────────
-
-function buildAnimation(translated) {
-  const FPS = 30;
-  const FRAME_TIME = 1 / FPS;
-
-  // Calcular duracion desde curvas
-  let maxTime = 0;
-  let totalKeyframes = 0;
-
-  const take = translated.takes[0] || { curves: [] };
-  take.curves.forEach(curve => {
-    if (curve.times && curve.times.length > 0) {
-      const lastTime = curve.times[curve.times.length - 1];
-      // FBX time en unidades de 1/46186158000 segundos
-      const seconds = lastTime / 46186158000;
-      if (seconds > maxTime) maxTime = seconds;
-      totalKeyframes += curve.times.length;
-    }
-  });
-
-  // Si no hay datos reales, generar animacion de ejemplo (idle)
-  if (maxTime === 0 || totalKeyframes === 0) {
-    maxTime = 1.0;
-    totalKeyframes = 30;
+  /* Hero */
+  .hero {
+    padding: 80px 0 60px;
+    text-align: center;
   }
 
-  return {
-    duration: maxTime > 0 ? maxTime : 1.0,
-    totalKeyframes: totalKeyframes,
-    fps: FPS,
-    boneMapping: translated.boneMapping,
-    curves: take.curves,
-    takeName: take.name || "animation"
-  };
-}
-
-// ── RBXANIM Generator ────────────────────────────────────────
-
-function generateRbxanim(anim) {
-  // Formato .rbxanim es XML
-  const bones = [
-    "HumanoidRootPart", "LowerTorso", "UpperTorso", "Head",
-    "LeftUpperArm", "LeftLowerArm", "LeftHand",
-    "RightUpperArm", "RightLowerArm", "RightHand",
-    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
-    "RightUpperLeg", "RightLowerLeg", "RightFoot"
-  ];
-
-  const fps = anim.fps;
-  const duration = anim.duration;
-  const frameCount = Math.max(Math.ceil(duration * fps), 2);
-
-  // Construir keyframes por hueso
-  let tracksXml = "";
-
-  bones.forEach(boneName => {
-    // Buscar datos de curva para este hueso
-    const boneData = getBoneKeyframeData(anim, boneName, frameCount, fps);
-
-    let keypointsXml = "";
-    boneData.forEach(kf => {
-      keypointsXml += `
-        <item>
-          <time>${kf.time.toFixed(6)}</time>
-          <pose>
-            <CFrame>
-              <R00>${kf.r00.toFixed(6)}</R00><R01>${kf.r01.toFixed(6)}</R01><R02>${kf.r02.toFixed(6)}</R02>
-              <R10>${kf.r10.toFixed(6)}</R10><R11>${kf.r11.toFixed(6)}</R11><R12>${kf.r12.toFixed(6)}</R12>
-              <R20>${kf.r20.toFixed(6)}</R20><R21>${kf.r21.toFixed(6)}</R21><R22>${kf.r22.toFixed(6)}</R22>
-              <X>${kf.x.toFixed(6)}</X><Y>${kf.y.toFixed(6)}</Y><Z>${kf.z.toFixed(6)}</Z>
-            </CFrame>
-          </pose>
-          <easingStyle>Linear</easingStyle>
-          <easingDirection>In</easingDirection>
-        </item>`;
-    });
-
-    tracksXml += `
-      <item>
-        <name>${boneName}</name>
-        <keypoints>${keypointsXml}
-        </keypoints>
-      </item>`;
-  });
-
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<KeyframeSequence xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <Name>${anim.takeName}</Name>
-  <Duration>${duration.toFixed(6)}</Duration>
-  <Loop>false</Loop>
-  <Priority>3</Priority>
-  <Keyframes>
-    <tracks>${tracksXml}
-    </tracks>
-  </Keyframes>
-</KeyframeSequence>`;
-
-  return xml;
-}
-
-function getBoneKeyframeData(anim, boneName, frameCount, fps) {
-  const keyframes = [];
-  const duration = anim.duration;
-
-  // Buscar curvas que correspondan a este hueso
-  const boneCurves = anim.curves.filter(c => {
-    if (!c.boneName) return false;
-    const mapped = BONE_MAP[c.boneName];
-    return mapped === boneName;
-  });
-
-  // Si hay datos reales de curva, usarlos
-  if (boneCurves.length > 0) {
-    // Agrupar por tiempo
-    const timeSet = new Set();
-    boneCurves.forEach(c => {
-      if (c.times) c.times.forEach(t => timeSet.add(t));
-    });
-
-    const sortedTimes = Array.from(timeSet).sort((a, b) => a - b);
-    sortedTimes.forEach(fbxTime => {
-      const seconds = fbxTime / 46186158000;
-      if (seconds > duration + 0.1) return;
-
-      const rx = getCurveValueAt(boneCurves, "X", fbxTime) * Math.PI / 180;
-      const ry = getCurveValueAt(boneCurves, "Y", fbxTime) * Math.PI / 180;
-      const rz = getCurveValueAt(boneCurves, "Z", fbxTime) * Math.PI / 180;
-
-      const mat = eulerToMatrix(rx, ry, rz);
-      keyframes.push({ time: seconds, ...mat, x: 0, y: 0, z: 0 });
-    });
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid rgba(124,108,250,0.3);
+    padding: 5px 14px;
+    border-radius: 20px;
+    margin-bottom: 28px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
   }
 
-  // Si no hay datos o muy pocos, generar keyframes de reposo
-  if (keyframes.length < 2) {
-    keyframes.length = 0;
-    const steps = Math.min(frameCount, 4);
-    for (let i = 0; i < steps; i++) {
-      const t = (i / (steps - 1)) * duration;
-      keyframes.push({
-        time: t,
-        r00: 1, r01: 0, r02: 0,
-        r10: 0, r11: 1, r12: 0,
-        r20: 0, r21: 0, r22: 1,
-        x: 0, y: 0, z: 0
-      });
-    }
+  .hero-tag::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
   }
 
-  return keyframes;
-}
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
 
-function getCurveValueAt(curves, component, time) {
-  const curve = curves.find(c => c.component === component);
-  if (!curve || !curve.times || curve.times.length === 0) return 0;
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1.05;
+    margin-bottom: 20px;
+  }
 
-  const idx = curve.times.findIndex(t => t >= time);
-  if (idx === -1) return curve.values[curve.values.length - 1] || 0;
-  if (idx === 0) return curve.values[0] || 0;
+  h1 .accent { color: var(--accent); }
+  h1 .accent2 { color: var(--accent2); }
 
-  // Interpolacion lineal
-  const t0 = curve.times[idx - 1];
-  const t1 = curve.times[idx];
-  const v0 = curve.values[idx - 1] || 0;
-  const v1 = curve.values[idx] || 0;
-  const alpha = (time - t0) / (t1 - t0);
-  return v0 + (v1 - v0) * alpha;
-}
+  .hero-sub {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 520px;
+    margin: 0 auto 48px;
+    line-height: 1.7;
+  }
 
-function eulerToMatrix(rx, ry, rz) {
-  const cx = Math.cos(rx), sx = Math.sin(rx);
-  const cy = Math.cos(ry), sy = Math.sin(ry);
-  const cz = Math.cos(rz), sz = Math.sin(rz);
+  /* Steps preview */
+  .steps-row {
+    display: flex;
+    gap: 0;
+    justify-content: center;
+    margin-bottom: 64px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
 
-  return {
-    r00: cy * cz,
-    r01: cy * sz,
-    r02: -sy,
-    r10: sx * sy * cz - cx * sz,
-    r11: sx * sy * sz + cx * cz,
-    r12: sx * cy,
-    r20: cx * sy * cz + sx * sz,
-    r21: cx * sy * sz - sx * cz,
-    r22: cx * cy,
-  };
-}
+  .step-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--surface);
+  }
 
-// ── Download ─────────────────────────────────────────────────
+  .step-chip .num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 500;
+  }
 
-function downloadFile(content, filename) {
-  const blob = new Blob([content], { type: "application/xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+  .step-arrow { color: var(--border); font-size: 16px; display: flex; align-items: center; padding: 0 4px; }
 
-// ── Lua Script Generator ─────────────────────────────────────
-// Genera un script de Lua para pegar en la Command Bar de Studio
-// que crea la animacion directamente en el personaje seleccionado
+  /* Main card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
 
-function generateLuaScript(rbxanimXml, animName) {
-  // Escapar el XML para meterlo en un string de Lua
-  // Usamos [[ ]] de Lua para strings multilinea
-  // pero necesitamos escapar los ]] que puedan estar dentro
-  const escaped = rbxanimXml
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "");
+  .card-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
 
-  const script = `-- Mixamo2Roblox — Script generado automaticamente
--- Pega esto en: View → Command Bar → Enter
-local animName = "${animName || 'MixamoAnim'}"
-local xmlData = "${escaped}"
+  .card-header-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
 
--- Buscar personaje seleccionado o el primero en Workspace
-local model = nil
-local sel = game:GetService("Selection"):Get()
-if #sel > 0 then
-  local s = sel[1]
-  if s:IsA("BasePart") then s = s.Parent end
-  if s:FindFirstChildOfClass("Humanoid") then model = s end
-end
-if not model then
-  for _, v in ipairs(workspace:GetChildren()) do
-    if v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") then
-      model = v
-      break
-    end
-  end
-end
-if not model then
-  warn("[Mixamo2Roblox] No se encontro personaje. Selecciona uno primero.")
-  return
-end
+  .card-header-text h2 {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
 
--- Guardar como StringValue para que Animation Editor lo importe
-local existing = model:FindFirstChild("MixamoAnimation_" .. animName)
-if existing then existing:Destroy() end
-local sv = Instance.new("StringValue")
-sv.Name = "MixamoAnimation_" .. animName
-sv.Value = xmlData
-sv.Parent = model
+  .card-header-text p {
+    font-size: 13px;
+    color: var(--muted);
+  }
 
--- Seleccionar el personaje
-game:GetService("Selection"):Set({model})
+  .card-body { padding: 28px; }
 
-print("[Mixamo2Roblox] ✅ Listo! Animacion guardada en: " .. model.Name)
-print("[Mixamo2Roblox] Ahora: Plugins → Animation Editor → selecciona el personaje → ··· → Import Animation")
-`;
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 56px 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
 
-  return script;
-}
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: rgba(124,108,250,0.05);
+  }
 
+  .dropzone.drag-over { transform: scale(1.01); }
 
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+  .drop-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+    filter: grayscale(0.3);
+  }
 
-console.log("[Mixamo2Roblox] Conversor cargado v1.0");
+  .drop-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+  }
+
+  .drop-sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .drop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .drop-btn:hover { opacity: 0.85; }
+
+  .drop-formats {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  input[type=file] { display: none; }
+
+  /* Progress */
+  .progress-wrap { display: none; }
+  .progress-wrap.visible { display: block; }
+
+  .progress-steps { display: flex; flex-direction: column; gap: 12px; }
+
+  .prog-step {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+
+  .prog-step.active { border-color: var(--accent); background: rgba(124,108,250,0.08); }
+  .prog-step.done { border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.05); }
+  .prog-step.error { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.05); }
+
+  .prog-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    transition: all 0.3s;
+  }
+
+  .prog-step.active .prog-icon { background: rgba(124,108,250,0.2); border-color: var(--accent); }
+  .prog-step.done .prog-icon { background: rgba(74,222,128,0.15); border-color: rgba(74,222,128,0.4); }
+
+  .prog-label { font-size: 14px; font-weight: 500; }
+  .prog-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .prog-status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  .prog-step.active .prog-status { background: rgba(124,108,250,0.2); color: var(--accent); }
+  .prog-step.done .prog-status { background: rgba(74,222,128,0.15); color: var(--green); }
+  .prog-step.error .prog-status { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  /* Spinner */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(124,108,250,0.3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Result */
+  .result-wrap { display: none; margin-top: 20px; }
+  .result-wrap.visible { display: block; }
+
+  .result-card {
+    background: rgba(74,222,128,0.06);
+    border: 1px solid rgba(74,222,128,0.25);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .result-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .result-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .result-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    text-align: center;
+  }
+
+  .stat-val {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--accent);
+    display: block;
+  }
+
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .download-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    letter-spacing: -0.3px;
+  }
+
+  .download-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .download-btn:active { transform: scale(0.99); }
+
+  .reset-btn {
+    width: 100%;
+    margin-top: 10px;
+    padding: 11px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .reset-btn:hover { border-color: var(--muted); color: var(--text); }
+
+  /* Info section */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  .info-card-icon { font-size: 24px; margin-bottom: 12px; display: block; }
+  .info-card h3 {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: -0.2px;
+  }
+  .info-card p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+  /* Instructions */
+  .instructions {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 28px;
+    margin-top: 20px;
+  }
+
+  .instructions h2 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 20px;
+  }
+
+  .inst-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .inst-step:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .inst-num {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: rgba(124,108,250,0.15);
+    border: 1px solid rgba(124,108,250,0.3);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .inst-body h4 { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .inst-body p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .inst-body code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--accent);
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+    position: relative; z-index: 1;
+  }
+
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* Error */
+  .error-card {
+    background: rgba(248,113,113,0.06);
+    border: 1px solid rgba(248,113,113,0.25);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 13px;
+    color: var(--red);
+    margin-top: 16px;
+    display: none;
+  }
+  .error-card.visible { display: block; }
+
+  /* Bone map table */
+  .bone-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  .bone-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .bone-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+  }
+  .bone-table tr:last-child td { border-bottom: none; }
+  .bone-table .from { color: var(--accent2); }
+  .bone-table .arrow { color: var(--muted); }
+  .bone-table .to { color: var(--accent); }
+
+  details { cursor: pointer; }
+  details summary { color: var(--muted); font-size: 13px; padding: 8px 0; list-style: none; display: flex; align-items: center; gap: 6px; }
+  details summary::before { content: '▶'; font-size: 10px; transition: transform 0.2s; }
+  details[open] summary::before { transform: rotate(90deg); }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 32px; }
+    .steps-row { gap: 6px; }
+    .step-arrow { display: none; }
+    .result-stats { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="blob blob1"></div>
+<div class="blob blob2"></div>
+
+<div class="container">
+  <nav>
+    <div class="logo">
+      <span class="logo-dot">Mixamo</span><span style="color:var(--muted)">2</span><span class="logo-dot2">Roblox</span>
+    </div>
+    <span class="nav-badge">v1.0 · gratis · open source</span>
+  </nav>
+
+  <div class="hero">
+    <div class="hero-tag">Conversor de animaciones</div>
+    <h1>Animaciones de <span class="accent">Mixamo</span><br>listas para <span class="accent2">Roblox</span></h1>
+    <p class="hero-sub">Sube tu archivo FBX de Mixamo y lo convertimos automáticamente al formato que Roblox entiende. Sin instalar nada, sin servidores, todo en tu navegador.</p>
+
+    <div class="steps-row">
+      <div class="step-chip"><span class="num">01</span> Descarga FBX de Mixamo</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">02</span> Sube aquí</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">03</span> Descarga .rbxanim</div>
+      <div class="step-arrow">→</div>
+      <div class="step-chip"><span class="num">04</span> Importa en Studio</div>
+    </div>
+  </div>
+
+  <!-- Main converter card -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-header-icon">🔄</div>
+      <div class="card-header-text">
+        <h2>Convertidor FBX → RBXANIM</h2>
+        <p>Conversión completa en tu navegador · Privado · Sin límites</p>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Drop zone -->
+      <div class="dropzone" id="dropzone">
+        <span class="drop-icon">📦</span>
+        <div class="drop-title">Arrastra tu archivo FBX aquí</div>
+        <div class="drop-sub">O haz clic para seleccionarlo desde tu computadora</div>
+        <button class="drop-btn" onclick="document.getElementById('fileInput').click()">
+          Seleccionar archivo FBX
+        </button>
+        <div class="drop-formats">FORMATO SOPORTADO: .FBX (Mixamo · Without Skin · 30fps)</div>
+        <input type="file" id="fileInput" accept=".fbx">
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-steps">
+          <div class="prog-step" id="step-parse">
+            <div class="prog-icon">📂</div>
+            <div>
+              <div class="prog-label">Leyendo archivo FBX</div>
+              <div class="prog-detail">Extrayendo datos de animación y huesos</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-bones">
+            <div class="prog-icon">🦴</div>
+            <div>
+              <div class="prog-label">Traduciendo huesos</div>
+              <div class="prog-detail">Mixamo → nombres de Roblox R15</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-keyframes">
+            <div class="prog-icon">🎞️</div>
+            <div>
+              <div class="prog-label">Convirtiendo keyframes</div>
+              <div class="prog-detail">Transformando rotaciones y posiciones</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+          <div class="prog-step" id="step-export">
+            <div class="prog-icon">✅</div>
+            <div>
+              <div class="prog-label">Generando archivo .rbxanim</div>
+              <div class="prog-detail">Formato listo para Roblox Studio</div>
+            </div>
+            <div class="prog-status">esperando</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div class="error-card" id="errorCard"></div>
+
+      <!-- Result -->
+      <div class="result-wrap" id="resultWrap">
+        <div class="result-card">
+          <div class="result-title">✅ Conversión completada</div>
+          <div class="result-sub">Tu animación está lista para importar en Roblox Studio</div>
+
+          <div class="result-stats">
+            <div class="stat">
+              <span class="stat-val" id="statBones">—</span>
+              <div class="stat-lbl">Huesos</div>
+            </div>
+            <div class="stat">
+              <span class="stat-val" id="statFrames">—</span>
+              <div class="stat-lbl">Keyframes</div>
+            </div>
+            <div class="stat">
+              <span class="stat-val" id="statDuration">—</span>
+              <div class="stat-lbl">Duración</div>
+            </div>
+          </div>
+
+          <button class="download-btn" id="downloadBtn">
+            ⬇ Descargar archivo .rbxanim
+          </button>
+          <button class="download-btn" id="copyStudioBtn" style="background:linear-gradient(135deg,#fa6c9f,#7c6cfa);margin-top:10px;">
+            📋 Copiar Script para Studio
+          </button>
+          <div id="copyFeedback" style="display:none;text-align:center;margin-top:8px;font-size:13px;color:#4ade80;font-family:var(--font-mono);">✅ Script copiado — pégalo en View → Command Bar en Studio</div>
+          <button class="reset-btn" onclick="resetConverter()">Convertir otra animación</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Info grid -->
+  <div class="info-grid">
+    <div class="info-card">
+      <span class="info-card-icon">🔒</span>
+      <h3>100% privado</h3>
+      <p>Tu archivo nunca sale de tu navegador. Todo se procesa localmente, sin servidores.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-icon">⚡</span>
+      <h3>Conversión automática</h3>
+      <p>Traduce automáticamente los 16 huesos de Mixamo a los nombres correctos de Roblox R15.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-icon">🎮</span>
+      <h3>Compatible con Studio</h3>
+      <p>El archivo .rbxanim resultante se importa directo en el Animation Editor de Roblox Studio.</p>
+    </div>
+  </div>
+
+  <!-- Instructions -->
+  <div class="instructions">
+    <h2>Cómo usarlo</h2>
+
+    <div class="inst-step">
+      <div class="inst-num">1</div>
+      <div class="inst-body">
+        <h4>Descarga la animación de Mixamo</h4>
+        <p>Ve a <strong>mixamo.com</strong> → elige una animación → Download con estas opciones: <code>FBX Binary</code> · <code>Without Skin</code> · <code>30 FPS</code></p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">2</div>
+      <div class="inst-body">
+        <h4>Sube el FBX aquí</h4>
+        <p>Arrastra el archivo o usa el botón. La conversión tarda menos de 1 segundo.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">3</div>
+      <div class="inst-body">
+        <h4>Descarga el .rbxanim</h4>
+        <p>Haz clic en "Descargar archivo .rbxanim" y guárdalo en tu PC.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">4</div>
+      <div class="inst-body">
+        <h4>Importa en Roblox Studio</h4>
+        <p>Abre el <code>Animation Editor</code> en Studio → selecciona tu personaje R15 → haz clic en <code>···</code> → <code>Import Animation</code> → selecciona el .rbxanim descargado.</p>
+      </div>
+    </div>
+
+    <div class="inst-step">
+      <div class="inst-num">5</div>
+      <div class="inst-body">
+        <h4>Publica y copia el ID</h4>
+        <p>En el Animation Editor haz clic en <code>Publish</code> para subir la animación a tu cuenta de Roblox y obtener el Animation ID para usar en tus scripts.</p>
+      </div>
+    </div>
+
+    <details style="margin-top:16px;">
+      <summary>Ver tabla de conversión de huesos Mixamo → Roblox</summary>
+      <table class="bone-table">
+        <thead>
+          <tr><th>Mixamo</th><th></th><th>Roblox R15</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="from">Hips</td><td class="arrow">→</td><td class="to">HumanoidRootPart</td></tr>
+          <tr><td class="from">Spine / Spine1</td><td class="arrow">→</td><td class="to">LowerTorso</td></tr>
+          <tr><td class="from">Spine2</td><td class="arrow">→</td><td class="to">UpperTorso</td></tr>
+          <tr><td class="from">Neck / Head</td><td class="arrow">→</td><td class="to">Head</td></tr>
+          <tr><td class="from">LeftShoulder / LeftArm</td><td class="arrow">→</td><td class="to">LeftUpperArm</td></tr>
+          <tr><td class="from">LeftForeArm</td><td class="arrow">→</td><td class="to">LeftLowerArm</td></tr>
+          <tr><td class="from">LeftHand</td><td class="arrow">→</td><td class="to">LeftHand</td></tr>
+          <tr><td class="from">RightShoulder / RightArm</td><td class="arrow">→</td><td class="to">RightUpperArm</td></tr>
+          <tr><td class="from">RightForeArm</td><td class="arrow">→</td><td class="to">RightLowerArm</td></tr>
+          <tr><td class="from">RightHand</td><td class="arrow">→</td><td class="to">RightHand</td></tr>
+          <tr><td class="from">LeftUpLeg</td><td class="arrow">→</td><td class="to">LeftUpperLeg</td></tr>
+          <tr><td class="from">LeftLeg</td><td class="arrow">→</td><td class="to">LeftLowerLeg</td></tr>
+          <tr><td class="from">LeftFoot</td><td class="arrow">→</td><td class="to">LeftFoot</td></tr>
+          <tr><td class="from">RightUpLeg</td><td class="arrow">→</td><td class="to">RightUpperLeg</td></tr>
+          <tr><td class="from">RightLeg</td><td class="arrow">→</td><td class="to">RightLowerLeg</td></tr>
+          <tr><td class="from">RightFoot</td><td class="arrow">→</td><td class="to">RightFoot</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+  <footer>
+    Hecho con ❤️ para la comunidad de Roblox · 
+    <a href="https://github.com" target="_blank">Ver en GitHub</a> · 
+    Gratis y open source para siempre
+  </footer>
+</div>
+
+<script src="converter.js"></script>
+</body>
+</html>
