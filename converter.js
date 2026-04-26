@@ -16,6 +16,13 @@ const BONE_MAP = {
   "mixamorig:RightShoulder":"RightUpperArm","mixamorig:RightArm":"RightUpperArm","mixamorig:RightForeArm":"RightLowerArm","mixamorig:RightHand":"RightHand",
   "mixamorig:LeftUpLeg":"LeftUpperLeg","mixamorig:LeftLeg":"LeftLowerLeg","mixamorig:LeftFoot":"LeftFoot",
   "mixamorig:RightUpLeg":"RightUpperLeg","mixamorig:RightLeg":"RightLowerLeg","mixamorig:RightFoot":"RightFoot",
+  // Sin dos puntos (Three.js remueve el : del nombre)
+  "mixamorigHips":"HumanoidRootPart","mixamorigSpine":"LowerTorso","mixamorigSpine1":"LowerTorso",
+  "mixamorigSpine2":"UpperTorso","mixamorigNeck":"Head","mixamorigHead":"Head",
+  "mixamorigLeftShoulder":"LeftUpperArm","mixamorigLeftArm":"LeftUpperArm","mixamorigLeftForeArm":"LeftLowerArm","mixamorigLeftHand":"LeftHand",
+  "mixamorigRightShoulder":"RightUpperArm","mixamorigRightArm":"RightUpperArm","mixamorigRightForeArm":"RightLowerArm","mixamorigRightHand":"RightHand",
+  "mixamorigLeftUpLeg":"LeftUpperLeg","mixamorigLeftLeg":"LeftLowerLeg","mixamorigLeftFoot":"LeftFoot","mixamorigLeftToeBase":"LeftFoot",
+  "mixamorigRightUpLeg":"RightUpperLeg","mixamorigRightLeg":"RightLowerLeg","mixamorigRightFoot":"RightFoot","mixamorigRightToeBase":"RightFoot",
 };
 
 let convertedRbxanim = null;
