@@ -442,7 +442,8 @@ end
 
 `;
 
-  // Multiplicar dos matrices
+  const identity = {r00:1,r01:0,r02:0,r10:0,r11:1,r12:0,r20:0,r21:0,r22:1,x:0,y:0,z:0};
+
   const mul = (a, b) => ({
     r00: a.r00*b.r00+a.r01*b.r10+a.r02*b.r20, r01: a.r00*b.r01+a.r01*b.r11+a.r02*b.r21, r02: a.r00*b.r02+a.r01*b.r12+a.r02*b.r22,
     r10: a.r10*b.r00+a.r11*b.r10+a.r12*b.r20, r11: a.r10*b.r01+a.r11*b.r11+a.r12*b.r21, r12: a.r10*b.r02+a.r11*b.r12+a.r12*b.r22,
@@ -457,14 +458,31 @@ end
     y:-(m.r01*m.x+m.r11*m.y+m.r21*m.z),
     z:-(m.r02*m.x+m.r12*m.y+m.r22*m.z),
   });
-  const identity = {r00:1,r01:0,r02:0,r10:0,r11:1,r12:0,r20:0,r21:0,r22:1,x:0,y:0,z:0};
+
   const getMat = (bone, t) => (reducedByBone[bone] && reducedByBone[bone][t]) || identity;
 
-  // CFrame relativo: inv(parent) * child — lo que Roblox necesita para Pose.CFrame
+  // Obtener la pose inicial (t=0) de cada hueso para usarla como referencia
+  const t0 = sortedTimes[0];
+  const initialPose = {};
+  Object.keys(BONE_HIERARCHY).forEach(bone => {
+    initialPose[bone] = getMat(bone, t0);
+  });
+
+  // CFrame relativo a Roblox:
+  // 1. Restar pose inicial del hueso (inv(initial) * current) = delta de rotacion
+  // 2. Luego hacerlo relativo al padre: inv(parentDelta) * childDelta
+  const getDelta = (bone, t) => {
+    const current = getMat(bone, t);
+    const initial = initialPose[bone];
+    return mul(inv(initial), current);
+  };
+
   const getRelCF = (bone, t) => {
     const parent = BONE_HIERARCHY[bone];
-    if (!parent) return getMat(bone, t);
-    return mul(inv(getMat(parent, t)), getMat(bone, t));
+    const childDelta = getDelta(bone, t);
+    if (!parent) return childDelta;
+    const parentDelta = getDelta(parent, t);
+    return mul(inv(parentDelta), childDelta);
   };
 
   const toCF = (m) =>
