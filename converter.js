@@ -362,14 +362,14 @@ for ti,t in ipairs(T)do
     local f=d[ti];if not f then poses[bn]=mkpose(poses[hier[bn]]or poses["HumanoidRootPart"],bn,CFrame.new());continue end
     -- Quaternion local directo de Mixamo (Three.js ya lo da en espacio local)
     local qx,qy,qz,qw=f[1],f[2],f[3],f[4]
-    -- Correccion de ejes Mixamo(Y-up Z-fwd) → Roblox(Y-up -Z-fwd)
-    local cf=CFrame.new(f[5],f[6],-f[7]) * CFrame.new(0,0,0, qx,-qy,-qz,qw, -(-qy*-qy+-qz*-qz)*2+1, (-qy*qx+qw*-qz)*2, (-qz*qx-qw*-qy)*2, (-qy*qx-qw*-qz)*2, -(-qz*-qz+qx*qx)*2+1, (-qz*-qy+qw*qx)*2, (-qz*qx+qw*-qy)*2, (-qz*-qy-qw*qx)*2, -(qx*qx+-qy*-qy)*2+1)
-    -- Usar formula directa CFrame.fromMatrix equivalente
-    local x2=qx+qx;local y2=-qy+-qy;local z2=-qz+-qz
-    local xx=qx*x2;local xy=qx*y2;local xz=qx*z2
-    local yy=-qy*y2;local yz=-qy*z2;local zz=-qz*z2
-    local wx=qw*x2;local wy=qw*y2;local wz=qw*z2
-    cf=CFrame.new(f[5],f[6],-f[7], 1-(yy+zz),xy+wz,xz-wy, xy-wz,1-(xx+zz),yz+wx, xz+wy,yz-wx,1-(xx+yy))
+    -- Convertir quaternion local de Mixamo a CFrame de Roblox
+    -- Correccion de ejes: negar Y y Z del quaternion
+    local rx,ry,rz,rw = qx,-qy,-qz,qw
+    local x2=rx+rx;local y2=ry+ry;local z2=rz+rz
+    local xx=rx*x2;local xy=rx*y2;local xz=rx*z2
+    local yy=ry*y2;local yz=ry*z2;local zz=rz*z2
+    local wx=rw*x2;local wy=rw*y2;local wz=rw*z2
+    local cf=CFrame.new(f[5],f[6],-f[7], 1-(yy+zz),xy+wz,xz-wy, xy-wz,1-(xx+zz),yz+wx, xz+wy,yz-wx,1-(xx+yy))
     poses[bn]=mkpose(poses[hier[bn]]or poses["HumanoidRootPart"],bn,cf)
   end
   kf.Parent=ks
